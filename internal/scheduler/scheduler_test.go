@@ -1,0 +1,288 @@
+package scheduler
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"mdtui/internal/content"
+	"mdtui/internal/document"
+	"mdtui/internal/runner"
+)
+
+type call struct {
+	ctx   context.Context
+	spec  runner.Spec
+	reply chan runner.Result
+}
+type fake struct{ calls chan call }
+
+func (f *fake) Run(ctx context.Context, s runner.Spec, b *content.Buffer) runner.Result {
+	c := call{ctx, s, make(chan runner.Result, 1)}
+	f.calls <- c
+	return <-c.reply
+}
+func fixture() (*Engine, *fake, *time.Time) {
+	now := time.Unix(100, 0)
+	p := &document.Page{MaxParallel: 2, Panels: []document.Panel{{ID: "list", Mode: "snapshot", Format: "items-json", Exec: []document.Arg{{Literal: "list"}}, Autostart: true}, {ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}, {Ref: "list.selected.id"}}, Autostart: true, Refresh: time.Second}, {ID: "log", Mode: "stream", Exec: []document.Arg{{Literal: "log"}, {Ref: "list.selected.id"}}}}}
+	f := &fake{make(chan call, 20)}
+	return New(p, f, func() time.Time { return now }), f, &now
+}
+func receive(t *testing.T, f *fake) call {
+	t.Helper()
+	select {
+	case c := <-f.calls:
+		return c
+	case <-time.After(time.Second):
+		t.Fatal("no process started")
+	}
+	return call{}
+}
+func finish(t *testing.T, e *Engine, c call, text string) {
+	t.Helper()
+	c.reply <- runner.Result{Stdout: []byte(text)}
+	select {
+	case ev := <-e.Events:
+		e.Consume(ev)
+	case <-time.After(time.Second):
+		t.Fatal("no completion")
+	}
+}
+func loaded(t *testing.T) (*Engine, *fake, *time.Time) {
+	e, f, now := fixture()
+	e.Start()
+	if e.Panels["detail"].Status != "blocked" {
+		t.Fatal("not blocked")
+	}
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"one"},{"id":"B","label":"two"}]}`)
+	return e, f, now
+}
+func TestGenerationAndRefreshCoalescing(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	a := receive(t, f)
+	if a.spec.Args[1] != "A" {
+		t.Fatal(a.spec)
+	}
+	e.Select("list", "B")
+	select {
+	case <-a.ctx.Done():
+	default:
+		t.Fatal("A not cancelled")
+	}
+	finish(t, e, a, "STALE A")
+	b := receive(t, f)
+	if b.spec.Args[1] != "B" || e.Panels["detail"].Text != "" {
+		t.Fatal("stale context")
+	}
+	for i := 0; i < 20; i++ {
+		e.Request("detail")
+	}
+	finish(t, e, b, "B")
+	again := receive(t, f)
+	finish(t, e, again, "B latest")
+	if e.Panels["detail"].Text != "B latest" || len(f.calls) != 0 {
+		t.Fatal("refresh not coalesced")
+	}
+}
+func TestFixedDelayAndStableSelection(t *testing.T) {
+	e, f, now := loaded(t)
+	e.Select("list", "A")
+	a := receive(t, f)
+	*now = now.Add(10 * time.Second)
+	e.Tick()
+	if len(f.calls) != 0 {
+		t.Fatal("overlapping query")
+	}
+	finish(t, e, a, "A")
+	*now = now.Add(999 * time.Millisecond)
+	e.Tick()
+	if len(f.calls) != 0 {
+		t.Fatal("early refresh")
+	}
+	*now = now.Add(time.Millisecond)
+	e.Tick()
+	finish(t, e, receive(t, f), "A2")
+	e.Request("list")
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"B","label":"new"},{"id":"A","label":"renamed"}]}`)
+	if len(f.calls) != 0 || e.Panels["list"].Selected != "A" {
+		t.Fatal("selection lost")
+	}
+	e.Request("list")
+	finish(t, e, receive(t, f), `{"version":1,"items":[]}`)
+	if e.Panels["detail"].Status != "blocked" || e.Panels["detail"].Text != "" {
+		t.Fatal("removed item retained")
+	}
+}
+func TestManualStreamNotRestarted(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Request("log")
+	log := receive(t, f)
+	e.Select("list", "B")
+	finish(t, e, log, "old log")
+	finish(t, e, receive(t, f), "B")
+	if len(f.calls) != 0 || e.Panels["log"].Status != "idle" {
+		t.Fatal("run automatically retried")
+	}
+}
+func TestFailurePreservesSnapshotAndRecovery(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "good")
+	e.Request("detail")
+	c := receive(t, f)
+	c.reply <- runner.Result{Err: context.DeadlineExceeded}
+	e.Consume(<-e.Events)
+	p := e.Panels["detail"]
+	if p.Text != "good" || !p.Stale || p.Failures != 1 {
+		t.Fatal(p)
+	}
+	e.Request("detail")
+	finish(t, e, receive(t, f), "recovered")
+	if p.Stale || p.Failures != 0 {
+		t.Fatal(p)
+	}
+	e.Request("list")
+	finish(t, e, receive(t, f), "bad JSON")
+	if e.Panels["list"].Selected != "A" || len(e.Panels["list"].Items) != 2 {
+		t.Fatal("bad JSON partially replaced list")
+	}
+}
+
+func TestTransitiveInvalidation(t *testing.T) {
+	e, f, _ := loaded(t)
+	d := document.Panel{ID: "children", Mode: "snapshot", Format: "items-json", Exec: []document.Arg{{Literal: "children"}, {Ref: "list.selected.id"}}, Autostart: true}
+	leaf := document.Panel{ID: "leaf", Mode: "snapshot", Exec: []document.Arg{{Literal: "leaf"}, {Ref: "children.selected.id"}}, Autostart: true}
+	e.Page.Panels = append(e.Page.Panels, d, leaf)
+	e.Panels[d.ID] = &Panel{Definition: d}
+	e.Panels[leaf.ID] = &Panel{Definition: leaf}
+	e.Select("list", "A")
+	first, second := receive(t, f), receive(t, f)
+	if first.spec.Args[0] == "children" {
+		first, second = second, first
+	}
+	finish(t, e, first, "A")
+	finish(t, e, second, `{"version":1,"items":[{"id":"child","label":"child"}]}`)
+	e.Select("children", "child")
+	old := receive(t, f)
+	e.Select("list", "B")
+	if e.Panels["children"].Selected != "" || e.Panels["leaf"].Status != "blocked" {
+		t.Fatal("transitive context retained")
+	}
+	finish(t, e, old, "stale leaf")
+	if e.Panels["leaf"].Text != "" {
+		t.Fatal("stale leaf committed")
+	}
+	for i := 0; i < 2; i++ {
+		c := receive(t, f)
+		text := "B"
+		if c.spec.Args[0] == "children" {
+			text = `{"version":1,"items":[]}`
+		}
+		finish(t, e, c, text)
+	}
+}
+
+func TestStreamReservesQueryAndSingleSlotRejection(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Request("log")
+	stream := receive(t, f)
+	e.Request("detail")
+	query := receive(t, f)
+	if query.spec.Args[0] != "show" || e.running != 2 {
+		t.Fatal("query starved by stream")
+	}
+	finish(t, e, query, "query while streaming")
+	e.Cancel("log")
+	finish(t, e, stream, "")
+	e.Page.MaxParallel = 1
+	if e.Request("log") == "" || len(f.calls) != 0 {
+		t.Fatal("stream accepted with single slot")
+	}
+}
+
+func TestInputLiteralMissingAndNoAutostart(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 2, Inputs: []document.Input{{ID: "input", Required: true}}, Panels: []document.Panel{{ID: "p", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "echo"}, {Ref: "input.value"}}}}}
+	e := New(p, f, time.Now)
+	e.Start()
+	if e.Panels["p"].Status != "blocked" {
+		t.Fatal("missing required input ran")
+	}
+	value := `space ' ;$(not-a-shell)`
+	e.Submit("input", value)
+	c := receive(t, f)
+	if len(c.spec.Args) != 2 || c.spec.Args[1] != value {
+		t.Fatal(c.spec.Args)
+	}
+	finish(t, e, c, "ok")
+	e.Submit("input", "")
+	if e.Panels["p"].Status != "blocked" || e.Panels["p"].Text != "" {
+		t.Fatal("cleared input did not invalidate")
+	}
+}
+
+func TestRunNeverSchedulesAutomaticRetry(t *testing.T) {
+	e, f, now := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "ready")
+	e.Run("detail")
+	c := receive(t, f)
+	c.reply <- runner.Result{Err: context.DeadlineExceeded}
+	e.Consume(<-e.Events)
+	*now = now.Add(time.Hour)
+	e.Tick()
+	if len(f.calls) != 0 || !e.Panels["detail"].Due.IsZero() {
+		t.Fatal("run action retried automatically")
+	}
+}
+
+func TestCommandOutputHasNoExecutionSemantics(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	c := receive(t, f)
+	source := ":::mdtui panel\nid: injected\nexec: [touch, NEVER_EXECUTE]\n:::"
+	finish(t, e, c, source)
+	if e.Panels["detail"].Text != source || len(e.Panels) != 3 || len(f.calls) != 0 {
+		t.Fatal("command output interpreted as page")
+	}
+}
+
+func TestPausedStreamKeepsViewportWhileReading(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Run("log")
+	c := receive(t, f)
+	p := e.Panels["log"]
+	for i := 0; i < 50; i++ {
+		p.active.buffer.Write([]byte("line\n"))
+	}
+	e.Tick()
+	p.Scroll = 10
+	p.Follow = false
+	p.active.buffer.Write([]byte("additional output\n"))
+	e.Tick()
+	if p.Scroll != 10 || !strings.HasSuffix(p.Text, "additional output\n") {
+		t.Fatal("paused viewport moved or stopped reading")
+	}
+	e.Cancel("log")
+	finish(t, e, c, "")
+}
+
+func TestSnapshotMarkdownRenderedBeforeCommit(t *testing.T) {
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "md", Mode: "snapshot", Format: "markdown", Autostart: true, Exec: []document.Arg{{Literal: "fixture"}}}}}
+	f := &fake{make(chan call, 1)}
+	e := New(p, f, time.Now)
+	e.Start()
+	c := receive(t, f)
+	finish(t, e, c, "# 标题\n\n[链接](https://example.test)")
+	if !strings.Contains(e.Panels["md"].Text, "▍ 标题") || !strings.Contains(e.Panels["md"].Text, "https://example.test") {
+		t.Fatal(e.Panels["md"].Text)
+	}
+}

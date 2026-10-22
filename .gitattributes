@@ -1,0 +1,11 @@
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.go text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.png binary
+*.gif binary
+docs/licenses/** whitespace=-blank-at-eol
+docs/requirements.md whitespace=-blank-at-eol

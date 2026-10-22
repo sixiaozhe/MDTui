@@ -1,0 +1,10 @@
+.tools/
+scripts/dev.sh
+bin/
+docs/evidence/
+*.log
+__pycache__/
+.DS_Store
+.idea/
+.vscode/
+coverage.out
