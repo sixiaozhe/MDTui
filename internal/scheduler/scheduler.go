@@ -55,6 +55,7 @@ type Engine struct {
 	sequence       uint64
 	running        int
 	closing        bool
+	paused         bool
 }
 
 func New(p *document.Page, r runner.Executor, now func() time.Time) *Engine {
@@ -126,6 +127,9 @@ func (e *Engine) request(id string, once bool) string {
 	if e.closing {
 		return "正在退出"
 	}
+	if e.paused {
+		return "页面已暂停"
+	}
 	if _, reason := e.Args(id); reason != "" {
 		p.Status = "blocked"
 		p.Reason = reason
@@ -152,7 +156,7 @@ func (e *Engine) request(id string, once bool) string {
 	return ""
 }
 func (e *Engine) enqueue(p *Panel) {
-	if e.closing || p.queued {
+	if e.closing || e.paused || p.queued {
 		return
 	}
 	p.queued = true
@@ -162,7 +166,7 @@ func (e *Engine) enqueue(p *Panel) {
 	e.queue = append(e.queue, p.Definition.ID)
 }
 func (e *Engine) dispatch() {
-	if e.closing {
+	if e.closing || e.paused {
 		return
 	}
 	for index := 0; index < len(e.queue) && e.running < e.Page.MaxParallel; {
@@ -319,6 +323,9 @@ func (e *Engine) readStream(p *Panel) bool {
 	return changed
 }
 func (e *Engine) Tick() bool {
+	if e.paused {
+		return false
+	}
 	changed := false
 	for _, d := range e.Page.Panels {
 		p := e.Panels[d.ID]
@@ -478,6 +485,69 @@ func (e *Engine) Preview(a document.Action) string {
 	}
 	return strings.Join(lines, "\n")
 }
+func (e *Engine) Paused() bool { return e.paused }
+
+// Pause 取消在途任务并排空事件，保留已有结果与选择。
+func (e *Engine) Pause() {
+	if e.paused {
+		return
+	}
+	e.paused = true
+	e.queue = nil
+	for _, p := range e.Panels {
+		p.Due = time.Time{}
+		p.pending = false
+		p.queuedRun, p.pendingRun = false, false
+		p.queued = false
+		if p.active != nil {
+			p.active.cancel()
+		}
+	}
+	for e.running > 0 {
+		e.consumePaused(<-e.Events)
+	}
+}
+
+func (e *Engine) consumePaused(ev Event) {
+	p := e.Panels[ev.ID]
+	if p == nil || p.active == nil || p.active.request != ev.Request {
+		return
+	}
+	p.active.cancel()
+	p.active = nil
+	e.running--
+	if p.Status == "running" || p.Status == "queued" {
+		if len(p.Items) > 0 || p.Text != "" {
+			p.Status = "ready"
+		} else {
+			p.Status = "idle"
+		}
+	}
+}
+
+// Resume 重启暂停前在运行的周期刷新和自动 stream。
+func (e *Engine) Resume() {
+	if !e.paused {
+		return
+	}
+	e.paused = false
+	for _, d := range e.Page.Panels {
+		p := e.Panels[d.ID]
+		if p.active != nil || p.queued {
+			continue
+		}
+		def := p.Definition
+		restart := def.Mode == "stream" && def.Autostart
+		if def.Refresh > 0 && (p.Status == "ready" || p.Status == "error") {
+			restart = true
+		}
+		if restart {
+			e.enqueue(p)
+		}
+	}
+	e.dispatch()
+}
+
 func (e *Engine) Close() {
 	e.closing = true
 	e.queue = nil

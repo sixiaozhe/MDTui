@@ -339,3 +339,76 @@ func TestPanelNamedParentStillResolves(t *testing.T) {
 		t.Fatalf("reserved page reason = %q", reason)
 	}
 }
+
+func TestPausePreservesAndResumeRestarts(t *testing.T) {
+	e, f, now := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["log"].Definition.Autostart = true
+	e.Request("log")
+	log := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	log.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	if !e.Paused() {
+		t.Fatal("not paused")
+	}
+	if e.Panels["log"].Status == "error" {
+		t.Fatal("cancel leaked into status")
+	}
+	if e.Panels["detail"].Text != "A" {
+		t.Fatal("snapshot lost")
+	}
+	*now = now.Add(time.Hour)
+	if e.Tick() {
+		t.Fatal("tick while paused")
+	}
+	e.Resume()
+	got := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		c := receive(t, f)
+		got[c.spec.Args[0]] = true
+		text := "A2"
+		if c.spec.Args[0] == "log" {
+			text = ""
+		}
+		finish(t, e, c, text)
+	}
+	if !got["show"] || !got["log"] {
+		t.Fatalf("restarted = %v", got)
+	}
+	if e.Panels["detail"].Text != "A2" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+	if e.Paused() {
+		t.Fatal("still paused")
+	}
+}
+
+func TestPauseDoesNotRerunOneShot(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Run("detail")
+	c := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	c.reply <- runner.Result{Err: context.Canceled}
+	<-done
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("one-shot reran after resume")
+	}
+}
