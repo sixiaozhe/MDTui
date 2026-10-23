@@ -530,12 +530,18 @@ func (e *Engine) settleStatus(p *Panel) {
 
 func (e *Engine) consumePaused(ev Event) {
 	if ev.Result.Err == nil || !errors.Is(ev.Result.Err, context.Canceled) {
+		if p := e.Panels[ev.ID]; p != nil {
+			p.pausedWork = false
+		}
 		e.Consume(ev)
 		return
 	}
 	p := e.Panels[ev.ID]
 	if p == nil || p.active == nil || p.active.request != ev.Request {
 		return
+	}
+	if p.Status == "cancelled" || p.active.once {
+		p.pausedWork = false
 	}
 	p.active.cancel()
 	p.active = nil

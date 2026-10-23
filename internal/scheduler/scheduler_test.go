@@ -525,3 +525,56 @@ func TestPauseDoesNotRestartCancelledStream(t *testing.T) {
 		t.Fatal("cancelled stream restarted")
 	}
 }
+
+func TestPauseDoesNotRestartNaturallyExitedStream(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Request("log")
+	stream := receive(t, f)
+	stream.reply <- runner.Result{Stdout: []byte("done")}
+	deadline := time.Now().Add(time.Second)
+	for len(e.Events) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("event not delivered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	e.Pause()
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("naturally exited stream restarted")
+	}
+	if s := e.Panels["log"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
+
+func TestPauseDoesNotRestartCancelBeforeDrain(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Request("log")
+	stream := receive(t, f)
+	e.Cancel("log")
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	stream.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("cancelled stream restarted")
+	}
+	if s := e.Panels["log"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
