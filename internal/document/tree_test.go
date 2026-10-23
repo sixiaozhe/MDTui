@@ -39,7 +39,7 @@ func TestCheckParentMismatch(t *testing.T) {
 	writePage(t, dir, "child.md", pageBody("child", "parent: other\n", ""))
 	root := writePage(t, dir, "root.md", pageBody("root", "", ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: ./child.md\n:::\n"))
 	_, err := Check(root)
-	if err == nil || !strings.Contains(err.Error(), "不一致") {
+	if err == nil || !strings.Contains(err.Error(), "不一致") || !strings.Contains(err.Error(), "list") || !strings.Contains(err.Error(), "./child.md") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -131,7 +131,7 @@ func TestCheckCycleAtMaxDepth(t *testing.T) {
 	}
 }
 
-func TestCheckSeenAtMaxDepthDoesNotFail(t *testing.T) {
+func TestCheckSeenAtMaxDepthStillRejects(t *testing.T) {
 	dir := t.TempDir()
 	writePage(t, dir, "p9.md", pageBody("p9", "", ""))
 	rootPanels := ":::mdtui panel\nid: a\nformat: items-json\nexec: [echo]\nopen: ./p9.md\n:::\n:::mdtui panel\nid: b\nformat: items-json\nexec: [echo]\nopen: ./p2.md\n:::\n"
@@ -144,12 +144,9 @@ func TestCheckSeenAtMaxDepthDoesNotFail(t *testing.T) {
 		panels := fmt.Sprintf(":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: %s\n:::\n", target)
 		writePage(t, dir, fmt.Sprintf("p%d.md", i), pageBody(fmt.Sprintf("p%d", i), "", panels))
 	}
-	pages, err := Check(filepath.Join(dir, "p1.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pages) != 9 {
-		t.Fatalf("pages = %d, want 9", len(pages))
+	_, err := Check(filepath.Join(dir, "p1.md"))
+	if err == nil || !strings.Contains(err.Error(), "超过 8 层") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 
 const (
 	MaxDepth = 8
-	MaxPages = 256
+	maxPages = 256
 )
 
 // Canonical 返回解析符号链接后的绝对路径。
@@ -58,9 +58,6 @@ func check(path string, loadPage func(string) (*Page, error)) ([]*Page, error) {
 	seen := map[string]bool{rootFile: true}
 	var walk func(current *Page, depth int, chain []string) error
 	walk = func(current *Page, depth int, chain []string) error {
-		if depth > MaxDepth {
-			return fmt.Errorf("%s: 页面嵌套超过 %d 层", current.File, MaxDepth)
-		}
 		for _, panel := range current.Panels {
 			if panel.Open == "" {
 				continue
@@ -75,25 +72,25 @@ func check(path string, loadPage func(string) (*Page, error)) ([]*Page, error) {
 					return fmt.Errorf("循环页面引用: %s", strings.Join(cycle, " -> "))
 				}
 			}
+			if depth >= MaxDepth {
+				return fmt.Errorf("%s: panel %q: open %q: 页面嵌套超过 %d 层", current.File, panel.ID, panel.Open, MaxDepth)
+			}
 			if seen[target] {
 				child := cache[target]
 				if child.Parent != "" && child.Parent != panel.ID {
-					return fmt.Errorf("%s: parent %q 与引用面板 %q 不一致", child.File, child.Parent, panel.ID)
+					return fmt.Errorf("%s: panel %q: open %q: %s: parent %q 不一致", current.File, panel.ID, panel.Open, child.File, child.Parent)
 				}
 				continue
 			}
-			if depth >= MaxDepth {
-				return fmt.Errorf("%s: panel %q: open %q: 页面嵌套超过 %d 层", current.File, panel.ID, panel.Open, MaxDepth)
+			if len(pages) >= maxPages {
+				return fmt.Errorf("%s: panel %q: open %q: 页面引用超过 %d 个", current.File, panel.ID, panel.Open, maxPages)
 			}
 			child, err := load(target)
 			if err != nil {
 				return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, panel.Open, err)
 			}
 			if child.Parent != "" && child.Parent != panel.ID {
-				return fmt.Errorf("%s: parent %q 与引用面板 %q 不一致", child.File, child.Parent, panel.ID)
-			}
-			if len(pages) >= MaxPages {
-				return fmt.Errorf("%s: 页面引用超过 %d 个", current.File, MaxPages)
+				return fmt.Errorf("%s: panel %q: open %q: %s: parent %q 不一致", current.File, panel.ID, panel.Open, child.File, child.Parent)
 			}
 			seen[target] = true
 			pages = append(pages, child)
