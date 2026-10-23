@@ -21,6 +21,8 @@ max_parallel: 2
 
 panel 声明必填 id、exec；可选 title、mode（snapshot 默认/stream）、format（markdown 默认/text/items-json）、refresh、timeout、autostart（默认 true）。snapshot 默认超时 5s，refresh 最小 250ms；stream 默认超时 0（不限时），不能设置 refresh 或 items-json。
 
+列表可以通过 `open: ./child.md` 进入子页。子页在 page 块声明 `parent: 列表ID` 后，可用 `{ref: "parent.selected.id"}` 读取父页选中对象。子页全屏显示并拥有独立面板；`Esc` 或 `q` 返回父页，父页的状态和刷新会恢复。`mdtui check` 会递归校验子页、循环引用和 8 层深度限制。示例见 [navigation.md](../examples/navigation.md)。
+
 exec 是非空数组，程序名必须为字面字符串，后续参数只接受字符串或 `{ref: "列表.selected.id"}`、`{ref: "输入.value"}`。数字参数必须加引号。引用占整个参数，不支持插值、表达式和 shell 求值。缺失选择/必填输入会阻塞，不会传空值猜测参数。
 
 input 的字段为 id、label（默认 ID）、default（默认空串）、required（默认 false）、max_length（默认 256，1～4096 Unicode 码点）。单行输入支持末尾追加和 Backspace；编辑草稿与提交值独立。不用于密码。

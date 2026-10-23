@@ -67,14 +67,23 @@ func run(args []string) (code int) {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	if check {
+		pages, err := document.Check(abs)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		panels := 0
+		for _, page := range pages {
+			panels += len(page.Panels)
+		}
+		fmt.Printf("%s: 校验通过 (%d 页面, %d panels)\n", file, len(pages), panels)
+		return 0
+	}
 	page, err := document.Load(abs)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
-	}
-	if check {
-		fmt.Printf("%s: 校验通过 (%d panels, %d inputs, %d actions)\n", file, len(page.Panels), len(page.Inputs), len(page.Actions))
-		return 0
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		fmt.Fprintln(os.Stderr, "需要可交互 TTY；仅校验请使用 mdtui check PAGE.md")
