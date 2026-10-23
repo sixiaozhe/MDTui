@@ -425,6 +425,7 @@ func TestResumePreservesStreamViewport(t *testing.T) {
 	p := e.Panels["log"]
 	p.Scroll = 5
 	p.Follow = false
+	p.Dropped = 10
 	done := make(chan struct{})
 	go func() {
 		e.Pause()
@@ -441,19 +442,25 @@ func TestResumePreservesStreamViewport(t *testing.T) {
 	}
 	e.Resume()
 	gotLog := false
+	var logCall call
 	for i := 0; i < 2; i++ {
 		c := receive(t, f)
 		if c.spec.Args[0] == "log" {
 			gotLog = true
+			logCall = c
+			continue
 		}
 		finish(t, e, c, "")
 	}
 	if !gotLog {
 		t.Fatal("stream not restarted")
 	}
+	p.active.buffer.Write([]byte("line\n"))
+	e.Tick()
 	if p.Scroll != 5 || p.Follow {
 		t.Fatalf("viewport reset: scroll=%d follow=%v", p.Scroll, p.Follow)
 	}
+	finish(t, e, logCall, "")
 }
 
 func TestPauseDoesNotRerunOneShot(t *testing.T) {

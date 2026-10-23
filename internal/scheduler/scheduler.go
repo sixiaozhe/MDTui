@@ -220,9 +220,9 @@ func (e *Engine) dispatch() {
 				p.Text = ""
 				p.Scroll = 0
 				p.Follow = true
-				p.Dropped = 0
-				p.Truncated = 0
 			}
+			p.Dropped = 0
+			p.Truncated = 0
 			p.resumeStream = false
 		}
 		e.running++
@@ -448,6 +448,7 @@ func (e *Engine) Cancel(id string) {
 	p.pending = false
 	p.queuedRun, p.pendingRun = false, false
 	p.queued = false
+	p.resumeStream = false
 	p.Due = time.Time{}
 	p.Status = "cancelled"
 	p.Reason = "用户已取消"
