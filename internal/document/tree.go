@@ -30,11 +30,15 @@ func Resolve(page *Page, ref string) (string, error) {
 
 // Check 递归加载并校验页面树，返回按首次访问顺序排列的页面。
 func Check(path string) ([]*Page, error) {
+	return check(path, Load)
+}
+
+func check(path string, loadPage func(string) (*Page, error)) ([]*Page, error) {
 	rootFile, err := Canonical(path)
 	if err != nil {
 		return nil, err
 	}
-	root, err := Load(rootFile)
+	root, err := loadPage(rootFile)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +47,7 @@ func Check(path string) ([]*Page, error) {
 		if page, ok := cache[file]; ok {
 			return page, nil
 		}
-		page, err := Load(file)
+		page, err := loadPage(file)
 		if err != nil {
 			return nil, err
 		}
@@ -65,14 +69,21 @@ func Check(path string) ([]*Page, error) {
 			if err != nil {
 				return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, panel.Open, err)
 			}
-			if depth >= MaxDepth {
-				return fmt.Errorf("%s: panel %q: open %q: 页面嵌套超过 %d 层", current.File, panel.ID, panel.Open, MaxDepth)
-			}
 			for _, file := range chain {
 				if file == target {
 					cycle := append(append([]string{}, chain...), target)
 					return fmt.Errorf("循环页面引用: %s", strings.Join(cycle, " -> "))
 				}
+			}
+			if seen[target] {
+				child := cache[target]
+				if child.Parent != "" && child.Parent != panel.ID {
+					return fmt.Errorf("%s: parent %q 与引用面板 %q 不一致", child.File, child.Parent, panel.ID)
+				}
+				continue
+			}
+			if depth >= MaxDepth {
+				return fmt.Errorf("%s: panel %q: open %q: 页面嵌套超过 %d 层", current.File, panel.ID, panel.Open, MaxDepth)
 			}
 			child, err := load(target)
 			if err != nil {
@@ -80,9 +91,6 @@ func Check(path string) ([]*Page, error) {
 			}
 			if child.Parent != "" && child.Parent != panel.ID {
 				return fmt.Errorf("%s: parent %q 与引用面板 %q 不一致", child.File, child.Parent, panel.ID)
-			}
-			if seen[target] {
-				continue
 			}
 			if len(pages) >= MaxPages {
 				return fmt.Errorf("%s: 页面引用超过 %d 个", current.File, MaxPages)

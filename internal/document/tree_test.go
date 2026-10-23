@@ -90,7 +90,7 @@ func TestCheckMissingTargetContext(t *testing.T) {
 	dir := t.TempDir()
 	root := writePage(t, dir, "root.md", pageBody("root", "", ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: ./missing.md\n:::\n"))
 	_, err := Check(root)
-	if err == nil || !strings.Contains(err.Error(), "list") || !strings.Contains(err.Error(), "missing.md") {
+	if err == nil || !strings.Contains(err.Error(), "root.md") || !strings.Contains(err.Error(), "list") || !strings.Contains(err.Error(), "missing.md") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -99,12 +99,57 @@ func TestCheckDuplicateTargetLoadedOnce(t *testing.T) {
 	dir := t.TempDir()
 	writePage(t, dir, "child.md", pageBody("child", "", ""))
 	root := writePage(t, dir, "root.md", pageBody("root", "", ":::mdtui panel\nid: p1\nformat: items-json\nexec: [echo]\nopen: ./child.md\n:::\n:::mdtui panel\nid: p2\nformat: items-json\nexec: [echo]\nopen: ./child.md\n:::\n"))
-	pages, err := Check(root)
+	loads := 0
+	pages, err := check(root, func(path string) (*Page, error) {
+		loads++
+		return Load(path)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(pages) != 2 {
 		t.Fatalf("pages = %d, want 2", len(pages))
+	}
+	if loads != 2 {
+		t.Fatalf("loads = %d, want 2", loads)
+	}
+}
+
+func TestCheckCycleAtMaxDepth(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 8; i++ {
+		target := fmt.Sprintf("./p%d.md", i+1)
+		if i == 8 {
+			target = "./p1.md"
+		}
+		panels := fmt.Sprintf(":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: %s\n:::\n", target)
+		writePage(t, dir, fmt.Sprintf("p%d.md", i), pageBody(fmt.Sprintf("p%d", i), "", panels))
+	}
+	_, err := Check(filepath.Join(dir, "p1.md"))
+	if err == nil || !strings.Contains(err.Error(), "循环页面引用") || strings.Contains(err.Error(), "超过 8 层") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCheckSeenAtMaxDepthDoesNotFail(t *testing.T) {
+	dir := t.TempDir()
+	writePage(t, dir, "p9.md", pageBody("p9", "", ""))
+	rootPanels := ":::mdtui panel\nid: a\nformat: items-json\nexec: [echo]\nopen: ./p9.md\n:::\n:::mdtui panel\nid: b\nformat: items-json\nexec: [echo]\nopen: ./p2.md\n:::\n"
+	writePage(t, dir, "p1.md", pageBody("p1", "", rootPanels))
+	for i := 2; i <= 8; i++ {
+		target := fmt.Sprintf("./p%d.md", i+1)
+		if i == 8 {
+			target = "./p9.md"
+		}
+		panels := fmt.Sprintf(":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: %s\n:::\n", target)
+		writePage(t, dir, fmt.Sprintf("p%d.md", i), pageBody(fmt.Sprintf("p%d", i), "", panels))
+	}
+	pages, err := Check(filepath.Join(dir, "p1.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 9 {
+		t.Fatalf("pages = %d, want 9", len(pages))
 	}
 }
 
