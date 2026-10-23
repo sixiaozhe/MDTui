@@ -38,7 +38,24 @@ type UI struct {
 	panelLines               map[string][]string
 	zoom                     bool
 	workspaceDetail          string
+	sessions                 []session
+	opened                   map[string]string
 }
+
+type session struct {
+	Engine          *scheduler.Engine
+	File            string
+	Focus           int
+	Zoom            bool
+	WorkspaceDetail string
+	ProseScroll     int
+	ProseX          int
+	SearchQuery     string
+	SearchIndex     int
+	SearchFocus     int
+	Opened          map[string]string
+}
+
 type cached struct {
 	source   string
 	width    int
@@ -61,8 +78,132 @@ func New(s tcell.Screen, e *scheduler.Engine, noColor bool) *UI {
 			break
 		}
 	}
-	return &UI{Screen: s, Engine: e, NoColor: noColor, focus: focus, workspaceDetail: detail, searchIndex: -1, searchFocus: -1, cache: map[string]cached{}, panelLines: map[string][]string{}}
+	return &UI{Screen: s, Engine: e, NoColor: noColor, focus: focus, workspaceDetail: detail, searchIndex: -1, searchFocus: -1, cache: map[string]cached{}, panelLines: map[string][]string{}, opened: map[string]string{}}
 }
+
+func (u *UI) depth() int { return len(u.sessions) + 1 }
+
+func (u *UI) saveSession() session {
+	file, _ := document.Canonical(u.Engine.Page.File)
+	return session{
+		Engine:          u.Engine,
+		File:            file,
+		Focus:           u.focus,
+		Zoom:            u.zoom,
+		WorkspaceDetail: u.workspaceDetail,
+		ProseScroll:     u.proseScroll,
+		ProseX:          u.proseX,
+		SearchQuery:     u.searchQuery,
+		SearchIndex:     u.searchIndex,
+		SearchFocus:     u.searchFocus,
+		Opened:          u.opened,
+	}
+}
+
+func (u *UI) restoreSession(s session) {
+	u.Engine = s.Engine
+	u.focus = s.Focus
+	u.zoom = s.Zoom
+	u.workspaceDetail = s.WorkspaceDetail
+	u.proseScroll, u.proseX = s.ProseScroll, s.ProseX
+	u.searchQuery, u.searchIndex, u.searchFocus = s.SearchQuery, s.SearchIndex, s.SearchFocus
+	u.opened = s.Opened
+}
+
+func (u *UI) resetView(page *document.Page) {
+	u.focus = 1 + len(page.Inputs)
+	if len(page.Panels) == 0 {
+		u.focus = 0
+		if len(page.Inputs) > 0 {
+			u.focus = 1
+		}
+	}
+	u.workspaceDetail = ""
+	for _, p := range page.Panels {
+		if p.ID != page.Sidebar {
+			u.workspaceDetail = p.ID
+			break
+		}
+	}
+	u.zoom = false
+	u.proseScroll, u.proseX = 0, 0
+	u.notice, u.modal, u.editing, u.searching = "", "", false, false
+	u.searchQuery, u.searchDraft = "", ""
+	u.searchIndex, u.searchFocus = -1, -1
+	u.action, u.confirm, u.menu = nil, false, 0
+	u.cache = map[string]cached{}
+	u.panelLines = map[string][]string{}
+}
+
+func (u *UI) pushChild(panelID string) {
+	p := u.Engine.Panels[panelID]
+	if p == nil || p.Definition.Open == "" || p.Selected == "" {
+		return
+	}
+	if u.opened[panelID] == p.Selected {
+		return
+	}
+	if u.depth() >= document.MaxDepth {
+		u.notice = fmt.Sprintf("页面嵌套超过 %d 层", document.MaxDepth)
+		return
+	}
+	target, err := document.Resolve(u.Engine.Page, p.Definition.Open)
+	if err != nil {
+		u.notice = err.Error()
+		return
+	}
+	current, err := document.Canonical(u.Engine.Page.File)
+	if err == nil {
+		if target == current {
+			u.notice = "页面不能引用自身"
+			return
+		}
+		for _, s := range u.sessions {
+			if s.File == target {
+				u.notice = "检测到循环页面引用"
+				return
+			}
+		}
+	}
+	page, err := document.Load(target)
+	if err != nil {
+		u.notice = err.Error()
+		return
+	}
+	if page.Parent != "" && page.Parent != panelID {
+		u.notice = fmt.Sprintf("子页 parent %q 与引用面板 %q 不一致", page.Parent, panelID)
+		return
+	}
+	selected := p.Selected
+	parent := u.Engine
+	u.opened[panelID] = selected
+	parent.Pause()
+	u.sessions = append(u.sessions, u.saveSession())
+	child := scheduler.New(page, parent.Runner, parent.Now)
+	child.Log = parent.Log
+	child.ParentSelected = selected
+	u.Engine = child
+	u.opened = map[string]string{}
+	u.resetView(page)
+	child.Start()
+}
+
+func (u *UI) popChild() bool {
+	if len(u.sessions) == 0 {
+		return false
+	}
+	u.Engine.Close()
+	last := u.sessions[len(u.sessions)-1]
+	u.sessions = u.sessions[:len(u.sessions)-1]
+	u.restoreSession(last)
+	u.cache = map[string]cached{}
+	u.panelLines = map[string][]string{}
+	u.notice, u.modal, u.editing, u.searching, u.searchDraft = "", "", false, false, ""
+	u.action, u.confirm, u.menu = nil, false, 0
+	u.Engine.Resume()
+	return true
+}
+
 func (u *UI) Run(ctx context.Context) error {
 	events := make(chan tcell.Event, 32)
 	stop := make(chan struct{})
@@ -298,7 +439,11 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 		u.modal = "actions"
 		u.menu = 0
 	case tcell.KeyEscape:
-		u.zoom = false
+		if u.zoom {
+			u.zoom = false
+		} else {
+			u.popChild()
+		}
 	case tcell.KeyEnter:
 		if u.focus > 0 && u.focus <= len(u.Engine.Page.Inputs) {
 			u.editing = true
@@ -354,6 +499,9 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 			return false
 		}
 		if k.Rune() == 'q' {
+			if u.popChild() {
+				return false
+			}
 			return true
 		}
 		if k.Rune() == '?' {
@@ -804,8 +952,14 @@ func (u *UI) Draw() {
 	}
 	u.fill(0, h-1, w, 1, ' ', footer)
 	shortcuts := "Tab 焦点   [ ] 视图   / 搜索   Enter 确认   F2 动作   Z 放大   ? 帮助   q 退出"
+	if len(u.sessions) > 0 {
+		shortcuts = fmt.Sprintf("子页 %d/%d   Esc/q 返回   Tab 焦点   [ ] 视图   Enter 确认   F2 动作   Z 放大", u.depth(), document.MaxDepth)
+	}
 	if w < 90 {
 		shortcuts = "Tab 焦点   Enter 确认   F2 动作   Z 放大   ? 帮助   q 退出"
+		if len(u.sessions) > 0 {
+			shortcuts = fmt.Sprintf("子页 %d/%d   Esc/q 返回   Tab 焦点   Enter 确认", u.depth(), document.MaxDepth)
+		}
 	}
 	u.put(2, h-1, w-4, 0, shortcuts, footer)
 	if u.modal != "" {

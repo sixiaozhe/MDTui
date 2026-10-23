@@ -6,6 +6,8 @@ import (
 	"mdtui/internal/document"
 	"mdtui/internal/runner"
 	"mdtui/internal/scheduler"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -285,5 +287,98 @@ func TestDrawsWorkbenchChromeAndRichMarkdown(t *testing.T) {
 	}
 	if strings.Contains(text, "**设备在线**") {
 		t.Fatal("markdown markers were rendered literally")
+	}
+}
+
+func navUI(t *testing.T, child string) *UI {
+	t.Helper()
+	dir := t.TempDir()
+	rootPath := filepath.Join(dir, "root.md")
+	root := ":::mdtui page\nversion: 1\nid: root\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./child.md\n:::\n"
+	if err := os.WriteFile(rootPath, []byte(root), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if child != "" {
+		if err := os.WriteFile(filepath.Join(dir, "child.md"), []byte(child), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := document.Load(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := tcell.NewSimulationScreen("UTF-8")
+	s.Init()
+	s.SetSize(120, 40)
+	t.Cleanup(s.Fini)
+	e := scheduler.New(page, runner.OS{}, time.Now)
+	e.Panels["list"].Items = []content.Item{{ID: "A", Label: "one"}, {ID: "B", Label: "two"}}
+	return New(s, e, false)
+}
+
+const childPage = ":::mdtui page\nversion: 1\nid: child\nparent: list\n:::\n:::mdtui panel\nid: detail\nautostart: false\nexec: [echo]\n:::\n"
+
+func TestPageNavigationPushPop(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "child" {
+		t.Fatal("child not pushed")
+	}
+	if u.Engine.ParentSelected != "A" {
+		t.Fatalf("parent selected = %q", u.Engine.ParentSelected)
+	}
+	if !u.sessions[0].Engine.Paused() {
+		t.Fatal("parent not paused")
+	}
+	if u.sessions[0].Engine.Panels["list"].Selected != "A" {
+		t.Fatal("parent selection lost")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	if len(u.sessions) != 0 || u.Engine.Page.ID != "root" {
+		t.Fatal("child not popped")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("parent not resumed")
+	}
+	if u.Engine.Panels["list"].Selected != "A" {
+		t.Fatal("selection lost after return")
+	}
+	u.pushChild("list")
+	if len(u.sessions) != 0 {
+		t.Fatal("same selection reopened child")
+	}
+	u.Engine.Select("list", "B")
+	u.pushChild("list")
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "B" {
+		t.Fatal("new selection did not open child")
+	}
+}
+
+func TestPageNavigationQuitKeys(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if u.Key(tcell.NewEventKey(tcell.KeyRune, 'q', 0)) {
+		t.Fatal("q exited from child")
+	}
+	if len(u.sessions) != 0 {
+		t.Fatal("q did not return")
+	}
+	if !u.Key(tcell.NewEventKey(tcell.KeyRune, 'q', 0)) {
+		t.Fatal("q did not exit root")
+	}
+}
+
+func TestPageNavigationDepthLimit(t *testing.T) {
+	u := navUI(t, childPage)
+	u.sessions = make([]session, document.MaxDepth-1)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if len(u.sessions) != document.MaxDepth-1 {
+		t.Fatal("depth limit not enforced")
+	}
+	if !strings.Contains(u.notice, "嵌套") {
+		t.Fatalf("notice = %q", u.notice)
 	}
 }
