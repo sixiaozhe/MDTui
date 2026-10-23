@@ -286,3 +286,23 @@ func TestSnapshotMarkdownRenderedBeforeCommit(t *testing.T) {
 		t.Fatal(e.Panels["md"].Text)
 	}
 }
+
+func TestParentSelectedReference(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}}}}
+	e := New(p, f, time.Now)
+	e.Start()
+	if e.Panels["detail"].Status != "blocked" {
+		t.Fatal("missing parent selection ran")
+	}
+	e.ParentSelected = "eth0"
+	e.Request("detail")
+	c := receive(t, f)
+	if len(c.spec.Args) != 2 || c.spec.Args[1] != "eth0" {
+		t.Fatal(c.spec.Args)
+	}
+	finish(t, e, c, "ok")
+	if e.Panels["detail"].Text != "ok" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+}

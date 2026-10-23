@@ -43,17 +43,18 @@ type Event struct {
 	Text                string
 }
 type Engine struct {
-	Page     *document.Page
-	Panels   map[string]*Panel
-	Inputs   map[string]string
-	Events   chan Event
-	Now      func() time.Time
-	Runner   runner.Executor
-	Log      func(string, ...any)
-	queue    []string
-	sequence uint64
-	running  int
-	closing  bool
+	Page           *document.Page
+	Panels         map[string]*Panel
+	Inputs         map[string]string
+	ParentSelected string
+	Events         chan Event
+	Now            func() time.Time
+	Runner         runner.Executor
+	Log            func(string, ...any)
+	queue          []string
+	sequence       uint64
+	running        int
+	closing        bool
 }
 
 func New(p *document.Page, r runner.Executor, now func() time.Time) *Engine {
@@ -87,6 +88,13 @@ func (e *Engine) Args(id string) ([]string, string) {
 			continue
 		}
 		parts := strings.Split(a.Ref, ".")
+		if len(parts) == 3 && parts[0] == "parent" && parts[1] == "selected" && parts[2] == "id" {
+			if e.ParentSelected == "" {
+				return nil, "请选择父页对象"
+			}
+			result = append(result, e.ParentSelected)
+			continue
+		}
 		if len(parts) == 2 {
 			value := e.Inputs[parts[0]]
 			for _, input := range e.Page.Inputs {
