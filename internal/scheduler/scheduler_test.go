@@ -289,11 +289,14 @@ func TestSnapshotMarkdownRenderedBeforeCommit(t *testing.T) {
 
 func TestParentSelectedReference(t *testing.T) {
 	f := &fake{make(chan call, 4)}
-	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}}}}
+	p := &document.Page{MaxParallel: 1, Parent: "list", Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}}}}
 	e := New(p, f, time.Now)
 	e.Start()
 	if e.Panels["detail"].Status != "blocked" {
 		t.Fatal("missing parent selection ran")
+	}
+	if reason := e.Request("detail"); reason != "请选择父页对象" {
+		t.Fatalf("reason = %q", reason)
 	}
 	e.ParentSelected = "eth0"
 	e.Request("detail")
@@ -304,5 +307,35 @@ func TestParentSelectedReference(t *testing.T) {
 	finish(t, e, c, "ok")
 	if e.Panels["detail"].Text != "ok" {
 		t.Fatal(e.Panels["detail"].Text)
+	}
+}
+
+func TestPanelNamedParentStillResolves(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{
+		{ID: "parent", Mode: "snapshot", Format: "items-json", Autostart: true, Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}},
+	}}
+	e := New(p, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"A"}]}`)
+	e.Panels["parent"].Items = []content.Item{{ID: "A", Label: "A"}}
+	e.Select("parent", "A")
+	c := receive(t, f)
+	if len(c.spec.Args) != 2 || c.spec.Args[1] != "A" {
+		t.Fatal(c.spec.Args)
+	}
+	finish(t, e, c, "ok")
+
+	e.ParentSelected = ""
+	if reason := e.Request("detail"); reason != "" {
+		t.Fatalf("root page reason = %q", reason)
+	}
+	finish(t, e, receive(t, f), "ok")
+
+	reserved := &document.Page{MaxParallel: 1, Parent: "list", Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}}}}
+	e2 := New(reserved, &fake{make(chan call, 1)}, time.Now)
+	if reason := e2.Request("detail"); reason != "请选择父页对象" {
+		t.Fatalf("reserved page reason = %q", reason)
 	}
 }

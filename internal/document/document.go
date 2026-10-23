@@ -305,17 +305,18 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			}
 			parts := strings.Split(a.Ref, ".")
 			valid := false
-			if len(parts) == 2 && parts[1] == "value" && inputs[parts[0]] {
+			if p.Parent != "" && len(parts) == 3 && parts[0] == "parent" && parts[1] == "selected" && parts[2] == "id" {
 				valid = true
-			}
-			if len(parts) == 3 && parts[1] == "selected" && parts[2] == "id" {
-				if x, ok := panels[parts[0]]; ok && x.Format == "items-json" {
+			} else {
+				if len(parts) == 2 && parts[1] == "value" && inputs[parts[0]] {
 					valid = true
-					graph[v.ID] = append(graph[v.ID], x.ID)
 				}
-			}
-			if len(parts) == 3 && parts[0] == "parent" && parts[1] == "selected" && parts[2] == "id" && p.Parent != "" {
-				valid = true
+				if len(parts) == 3 && parts[1] == "selected" && parts[2] == "id" {
+					if x, ok := panels[parts[0]]; ok && x.Format == "items-json" {
+						valid = true
+						graph[v.ID] = append(graph[v.ID], x.ID)
+					}
+				}
 			}
 			if !valid {
 				c.fail(lineOf(v.ID), "exec.ref", "无效引用 "+a.Ref+"；使用列表.selected.id、输入.value 或 parent.selected.id")

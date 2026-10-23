@@ -88,7 +88,7 @@ func (e *Engine) Args(id string) ([]string, string) {
 			continue
 		}
 		parts := strings.Split(a.Ref, ".")
-		if len(parts) == 3 && parts[0] == "parent" && parts[1] == "selected" && parts[2] == "id" {
+		if e.Page.Parent != "" && len(parts) == 3 && parts[0] == "parent" && parts[1] == "selected" && parts[2] == "id" {
 			if e.ParentSelected == "" {
 				return nil, "请选择父页对象"
 			}

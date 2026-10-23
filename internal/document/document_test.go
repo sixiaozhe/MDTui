@@ -32,6 +32,7 @@ func TestCompilerContracts(t *testing.T) {
 		{"open-wrong-format", header + ":::mdtui panel\nid: x\nexec: [echo]\nopen: ./child.md\n:::", false},
 		{"open-absolute", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: /tmp/child.md\n:::", false},
 		{"parent-ref", strings.Replace(header, "id: test", "id: test\nparent: list", 1) + ":::mdtui panel\nid: x\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", true},
+		{"panel-named-parent", header + ":::mdtui panel\nid: parent\nformat: items-json\nexec: [echo]\n:::\n:::mdtui panel\nid: detail\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", true},
 		{"parent-ref-without-parent", header + ":::mdtui panel\nid: x\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", false},
 		{"parent-invalid", strings.Replace(header, "id: test", "id: test\nparent: 1bad", 1), false},
 		{"open-empty", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"\"\n:::", false},
