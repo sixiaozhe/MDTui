@@ -406,7 +406,11 @@ func TestPauseDoesNotRerunOneShot(t *testing.T) {
 		close(done)
 	}()
 	c.reply <- runner.Result{Err: context.Canceled}
-	<-done
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
 	e.Resume()
 	if len(f.calls) != 0 {
 		t.Fatal("one-shot reran after resume")
@@ -457,5 +461,67 @@ func TestPauseSettlesQueuedRefresh(t *testing.T) {
 	finish(t, e, receive(t, f), "new")
 	if q.Text != "new" {
 		t.Fatal(q.Text)
+	}
+}
+
+func TestPauseResumesActiveSnapshot(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "snap", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "snap"}}}}}
+	e := New(p, f, time.Now)
+	e.Start()
+	c := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	c.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	again := receive(t, f)
+	if again.spec.Args[0] != "snap" {
+		t.Fatal(again.spec.Args)
+	}
+}
+
+func TestPauseCommitsCompletedEvent(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	c := receive(t, f)
+	c.reply <- runner.Result{Stdout: []byte("done")}
+	deadline := time.Now().Add(time.Second)
+	for len(e.Events) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("event not delivered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	e.Pause()
+	if e.Panels["detail"].Text != "done" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+	if e.Panels["detail"].Status != "ready" {
+		t.Fatal(e.Panels["detail"].Status)
+	}
+}
+
+func TestPauseDoesNotRestartCancelledStream(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Panels["log"].Definition.Autostart = true
+	e.Run("log")
+	stream := receive(t, f)
+	e.Cancel("log")
+	finish(t, e, stream, "")
+	e.Pause()
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("cancelled stream restarted")
 	}
 }

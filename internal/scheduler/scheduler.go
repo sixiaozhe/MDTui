@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ type Panel struct {
 	Duration                                        time.Duration
 	pending, queued                                 bool
 	queuedRun, pendingRun                           bool
-	pausedOnce                                      bool
+	pausedWork, pausedOnce                          bool
 	active                                          *job
 }
 type job struct {
@@ -497,12 +498,10 @@ func (e *Engine) Pause() {
 	e.paused = true
 	e.queue = nil
 	for _, p := range e.Panels {
-		if p.active != nil && p.active.once {
-			p.pausedOnce = true
-		}
-		if p.queuedRun {
-			p.pausedOnce = true
-		}
+		regularWork := (p.active != nil && !p.active.once) || (p.queued && !p.queuedRun) || (p.pending && !p.pendingRun)
+		oneWork := (p.active != nil && p.active.once) || p.queuedRun || p.pendingRun
+		p.pausedWork = regularWork
+		p.pausedOnce = !regularWork && oneWork
 		p.Due = time.Time{}
 		p.pending = false
 		p.queuedRun, p.pendingRun = false, false
@@ -530,6 +529,10 @@ func (e *Engine) settleStatus(p *Panel) {
 }
 
 func (e *Engine) consumePaused(ev Event) {
+	if ev.Result.Err == nil || !errors.Is(ev.Result.Err, context.Canceled) {
+		e.Consume(ev)
+		return
+	}
 	p := e.Panels[ev.ID]
 	if p == nil || p.active == nil || p.active.request != ev.Request {
 		return
@@ -552,13 +555,14 @@ func (e *Engine) Resume() {
 			continue
 		}
 		def := p.Definition
-		restart := def.Mode == "stream" && def.Autostart
+		restart := p.pausedWork
 		if def.Refresh > 0 && (p.Status == "ready" || p.Status == "error") {
 			restart = true
 		}
 		if p.pausedOnce {
 			restart = false
 		}
+		p.pausedWork = false
 		p.pausedOnce = false
 		if restart {
 			e.enqueue(p)
