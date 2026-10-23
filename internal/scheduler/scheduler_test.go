@@ -638,3 +638,21 @@ func TestPauseResumesPendingRegularAfterOneShotSuccess(t *testing.T) {
 		t.Fatal(e.Panels["detail"].Text)
 	}
 }
+
+func TestPauseKeepsStaleGenerationWork(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	old := receive(t, f)
+	e.Select("list", "B")
+	old.reply <- runner.Result{Stdout: []byte("old")}
+	e.Pause()
+	e.Resume()
+	next := receive(t, f)
+	if len(next.spec.Args) != 2 || next.spec.Args[0] != "show" || next.spec.Args[1] != "B" {
+		t.Fatalf("args = %v", next.spec.Args)
+	}
+	finish(t, e, next, "new")
+	if e.Panels["detail"].Text != "new" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+}

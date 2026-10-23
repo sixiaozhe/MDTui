@@ -534,8 +534,9 @@ func (e *Engine) consumePaused(ev Event) {
 		return
 	}
 	once := p.active.once
+	current := ev.Generation == p.Generation
 	if ev.Result.Err == nil || !errors.Is(ev.Result.Err, context.Canceled) {
-		if !once {
+		if current && !once {
 			p.pausedWork = false
 		}
 		e.Consume(ev)
@@ -550,7 +551,7 @@ func (e *Engine) consumePaused(ev Event) {
 	e.settleStatus(p)
 }
 
-// Resume 重启暂停前在运行的周期刷新和自动 stream。
+// Resume 重启暂停时在途的常规任务，以及 ready/error 的周期刷新面板。
 func (e *Engine) Resume() {
 	if !e.paused {
 		return
