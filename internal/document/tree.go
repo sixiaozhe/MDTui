@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-const MaxDepth = 8
+const (
+	MaxDepth = 8
+	MaxPages = 256
+)
 
 // Canonical 返回解析符号链接后的绝对路径。
 func Canonical(path string) (string, error) {
@@ -35,6 +38,18 @@ func Check(path string) ([]*Page, error) {
 	if err != nil {
 		return nil, err
 	}
+	cache := map[string]*Page{rootFile: root}
+	load := func(file string) (*Page, error) {
+		if page, ok := cache[file]; ok {
+			return page, nil
+		}
+		page, err := Load(file)
+		if err != nil {
+			return nil, err
+		}
+		cache[file] = page
+		return page, nil
+	}
 	pages := []*Page{root}
 	seen := map[string]bool{rootFile: true}
 	var walk func(current *Page, depth int, chain []string) error
@@ -48,7 +63,10 @@ func Check(path string) ([]*Page, error) {
 			}
 			target, err := Resolve(current, panel.Open)
 			if err != nil {
-				return err
+				return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, panel.Open, err)
+			}
+			if depth >= MaxDepth {
+				return fmt.Errorf("%s: panel %q: open %q: 页面嵌套超过 %d 层", current.File, panel.ID, panel.Open, MaxDepth)
 			}
 			for _, file := range chain {
 				if file == target {
@@ -56,9 +74,9 @@ func Check(path string) ([]*Page, error) {
 					return fmt.Errorf("循环页面引用: %s", strings.Join(cycle, " -> "))
 				}
 			}
-			child, err := Load(target)
+			child, err := load(target)
 			if err != nil {
-				return err
+				return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, panel.Open, err)
 			}
 			if child.Parent != "" && child.Parent != panel.ID {
 				return fmt.Errorf("%s: parent %q 与引用面板 %q 不一致", child.File, child.Parent, panel.ID)
@@ -66,12 +84,12 @@ func Check(path string) ([]*Page, error) {
 			if seen[target] {
 				continue
 			}
-			if len(pages) >= 256 {
-				return fmt.Errorf("%s: 页面引用超过 256 个", current.File)
+			if len(pages) >= MaxPages {
+				return fmt.Errorf("%s: 页面引用超过 %d 个", current.File, MaxPages)
 			}
 			seen[target] = true
 			pages = append(pages, child)
-			if err := walk(child, depth+1, append(chain, target)); err != nil {
+			if err := walk(child, depth+1, append(chain[:len(chain):len(chain)], target)); err != nil {
 				return err
 			}
 		}

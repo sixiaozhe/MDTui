@@ -68,7 +68,47 @@ func TestCheckDepth(t *testing.T) {
 	}
 }
 
-func TestResolveRejectsAbsoluteAndSymlinkCycle(t *testing.T) {
+func TestCheckDepthEightPasses(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 8; i++ {
+		panels := ""
+		if i < 8 {
+			panels = fmt.Sprintf(":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: ./p%d.md\n:::\n", i+1)
+		}
+		writePage(t, dir, fmt.Sprintf("p%d.md", i), pageBody(fmt.Sprintf("p%d", i), "", panels))
+	}
+	pages, err := Check(filepath.Join(dir, "p1.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 8 {
+		t.Fatalf("pages = %d, want 8", len(pages))
+	}
+}
+
+func TestCheckMissingTargetContext(t *testing.T) {
+	dir := t.TempDir()
+	root := writePage(t, dir, "root.md", pageBody("root", "", ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: ./missing.md\n:::\n"))
+	_, err := Check(root)
+	if err == nil || !strings.Contains(err.Error(), "list") || !strings.Contains(err.Error(), "missing.md") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCheckDuplicateTargetLoadedOnce(t *testing.T) {
+	dir := t.TempDir()
+	writePage(t, dir, "child.md", pageBody("child", "", ""))
+	root := writePage(t, dir, "root.md", pageBody("root", "", ":::mdtui panel\nid: p1\nformat: items-json\nexec: [echo]\nopen: ./child.md\n:::\n:::mdtui panel\nid: p2\nformat: items-json\nexec: [echo]\nopen: ./child.md\n:::\n"))
+	pages, err := Check(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 2 {
+		t.Fatalf("pages = %d, want 2", len(pages))
+	}
+}
+
+func TestResolveCanonicalizesSymlink(t *testing.T) {
 	dir := t.TempDir()
 	page := &Page{File: filepath.Join(dir, "root.md"), Dir: dir}
 	if _, err := Resolve(page, filepath.Join(dir, "child.md")); err == nil {
@@ -88,5 +128,16 @@ func TestResolveRejectsAbsoluteAndSymlinkCycle(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("resolve = %q, want %q", got, want)
+	}
+}
+
+func TestResolveSymlinkCycle(t *testing.T) {
+	dir := t.TempDir()
+	page := &Page{File: filepath.Join(dir, "root.md"), Dir: dir}
+	if err := os.Symlink("loop.md", filepath.Join(dir, "loop.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resolve(page, "./loop.md"); err == nil {
+		t.Fatal("accepted symlink cycle")
 	}
 }
