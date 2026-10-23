@@ -37,6 +37,11 @@ func TestCompilerContracts(t *testing.T) {
 		{"parent-invalid", strings.Replace(header, "id: test", "id: test\nparent: 1bad", 1), false},
 		{"open-empty", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"\"\n:::", false},
 		{"open-blank", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"   \"\n:::", false},
+		{"open-map-valid", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: {system: ./system.md, network: ./network.md}\n:::", true},
+		{"open-map-empty-path", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: {system: \"\"}\n:::", false},
+		{"open-map-non-string", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: {system: 1}\n:::", false},
+		{"open-map-empty", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: {}\n:::", false},
+		{"open-map-wrong-format", header + ":::mdtui panel\nid: list\nexec: [echo]\nopen: {system: ./system.md}\n:::", false},
 		{"reserved-key", header + ":::mdtui panel\nid: x\nexec: [echo]\n:::\n:::mdtui action\nid: a\nrun: x\nkey: q\n:::", false},
 	}
 	for _, tc := range cases {
@@ -59,6 +64,28 @@ func TestOpenPathIsTrimmed(t *testing.T) {
 	}
 	if len(p.Panels) != 1 || p.Panels[0].Open != "./child.md" {
 		t.Fatalf("open = %q", p.Panels[0].Open)
+	}
+}
+
+func TestOpenTargets(t *testing.T) {
+	body := header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen:\n  network: ./network.md\n  system: \"./system.md\"\n:::"
+	p, err := Parse("fixture.md", []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	panel := p.Panels[0]
+	if !panel.HasOpen() {
+		t.Fatal("map open not parsed")
+	}
+	if target, ok := panel.OpenTarget("network"); !ok || target != "./network.md" {
+		t.Fatalf("network target = %q, %v", target, ok)
+	}
+	if _, ok := panel.OpenTarget("missing"); ok {
+		t.Fatal("unexpected target for missing item")
+	}
+	targets := panel.OpenTargets()
+	if len(targets) != 2 || targets[0] != "./network.md" || targets[1] != "./system.md" {
+		t.Fatalf("targets = %#v", targets)
 	}
 }
 

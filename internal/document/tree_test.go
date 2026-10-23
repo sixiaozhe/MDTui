@@ -34,6 +34,29 @@ func TestCheckFollowsOpen(t *testing.T) {
 	}
 }
 
+func TestCheckFollowsOpenMap(t *testing.T) {
+	dir := t.TempDir()
+	writePage(t, dir, "a.md", pageBody("a", "parent: list\n", ""))
+	writePage(t, dir, "b.md", pageBody("b", "parent: list\n", ""))
+	root := writePage(t, dir, "root.md", pageBody("root", "", ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen:\n  a: ./a.md\n  b: ./b.md\n:::\n"))
+	pages, err := Check(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 3 || pages[1].ID != "a" || pages[2].ID != "b" {
+		t.Fatalf("pages = %#v", pages)
+	}
+}
+
+func TestCheckOpenMapMissingTarget(t *testing.T) {
+	dir := t.TempDir()
+	root := writePage(t, dir, "root.md", pageBody("root", "", ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: {system: ./missing.md}\n:::\n"))
+	_, err := Check(root)
+	if err == nil || !strings.Contains(err.Error(), "missing.md") || !strings.Contains(err.Error(), "list") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestCheckParentMismatch(t *testing.T) {
 	dir := t.TempDir()
 	writePage(t, dir, "child.md", pageBody("child", "parent: other\n", ""))

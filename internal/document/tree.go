@@ -59,43 +59,45 @@ func check(path string, loadPage func(string) (*Page, error)) ([]*Page, error) {
 	var walk func(current *Page, depth int, chain []string) error
 	walk = func(current *Page, depth int, chain []string) error {
 		for _, panel := range current.Panels {
-			if panel.Open == "" {
+			if !panel.HasOpen() {
 				continue
 			}
-			target, err := Resolve(current, panel.Open)
-			if err != nil {
-				return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, panel.Open, err)
-			}
-			for _, file := range chain {
-				if file == target {
-					cycle := append(append([]string{}, chain...), target)
-					return fmt.Errorf("循环页面引用: %s", strings.Join(cycle, " -> "))
+			for _, ref := range panel.OpenTargets() {
+				target, err := Resolve(current, ref)
+				if err != nil {
+					return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, ref, err)
 				}
-			}
-			if depth >= MaxDepth {
-				return fmt.Errorf("%s: panel %q: open %q: 页面嵌套超过 %d 层", current.File, panel.ID, panel.Open, MaxDepth)
-			}
-			if seen[target] {
-				child := cache[target]
+				for _, file := range chain {
+					if file == target {
+						cycle := append(append([]string{}, chain...), target)
+						return fmt.Errorf("循环页面引用: %s", strings.Join(cycle, " -> "))
+					}
+				}
+				if depth >= MaxDepth {
+					return fmt.Errorf("%s: panel %q: open %q: 页面嵌套超过 %d 层", current.File, panel.ID, ref, MaxDepth)
+				}
+				if seen[target] {
+					child := cache[target]
+					if child.Parent != "" && child.Parent != panel.ID {
+						return fmt.Errorf("%s: panel %q: open %q: %s: parent %q 不一致", current.File, panel.ID, ref, child.File, child.Parent)
+					}
+					continue
+				}
+				if len(pages) >= maxPages {
+					return fmt.Errorf("%s: panel %q: open %q: 页面引用超过 %d 个", current.File, panel.ID, ref, maxPages)
+				}
+				child, err := load(target)
+				if err != nil {
+					return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, ref, err)
+				}
 				if child.Parent != "" && child.Parent != panel.ID {
-					return fmt.Errorf("%s: panel %q: open %q: %s: parent %q 不一致", current.File, panel.ID, panel.Open, child.File, child.Parent)
+					return fmt.Errorf("%s: panel %q: open %q: %s: parent %q 不一致", current.File, panel.ID, ref, child.File, child.Parent)
 				}
-				continue
-			}
-			if len(pages) >= maxPages {
-				return fmt.Errorf("%s: panel %q: open %q: 页面引用超过 %d 个", current.File, panel.ID, panel.Open, maxPages)
-			}
-			child, err := load(target)
-			if err != nil {
-				return fmt.Errorf("%s: panel %q: open %q: %w", current.File, panel.ID, panel.Open, err)
-			}
-			if child.Parent != "" && child.Parent != panel.ID {
-				return fmt.Errorf("%s: panel %q: open %q: %s: parent %q 不一致", current.File, panel.ID, panel.Open, child.File, child.Parent)
-			}
-			seen[target] = true
-			pages = append(pages, child)
-			if err := walk(child, depth+1, append(chain[:len(chain):len(chain)], target)); err != nil {
-				return err
+				seen[target] = true
+				pages = append(pages, child)
+				if err := walk(child, depth+1, append(chain[:len(chain):len(chain)], target)); err != nil {
+					return err
+				}
 			}
 		}
 		return nil

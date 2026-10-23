@@ -143,17 +143,22 @@ func (u *UI) resetView(page *document.Page) {
 
 func (u *UI) pushChild(panelID string) {
 	p := u.Engine.Panels[panelID]
-	if p == nil || p.Definition.Open == "" || p.Selected == "" {
+	if p == nil || !p.Definition.HasOpen() || p.Selected == "" {
 		return
 	}
 	if u.opened[panelID] == p.Selected {
+		return
+	}
+	ref, ok := p.Definition.OpenTarget(p.Selected)
+	if !ok {
+		u.notice = fmt.Sprintf("当前选项 %q 未配置子页", p.Selected)
 		return
 	}
 	if u.depth() >= document.MaxDepth {
 		u.notice = fmt.Sprintf("页面嵌套超过 %d 层", document.MaxDepth)
 		return
 	}
-	target, err := document.Resolve(u.Engine.Page, p.Definition.Open)
+	target, err := document.Resolve(u.Engine.Page, ref)
 	if err != nil {
 		u.notice = err.Error()
 		return
@@ -474,7 +479,7 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 			if p.Selected != before {
 				delete(u.opened, p.Definition.ID)
 			}
-			if p.Definition.Open != "" && p.Selected != "" {
+			if p.Definition.HasOpen() && p.Selected != "" {
 				u.pushChild(p.Definition.ID)
 			}
 		}

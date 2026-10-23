@@ -19,9 +19,17 @@ max_parallel: 2
 
 任务较多时可用 `layout: workspace` 和 `sidebar: 列表面板ID`。宽终端左侧保留列表、右侧一次显示一个详情面板；窄终端显示当前焦点面板。列表选中对象后，工作区会自动显示首个引用该列表的详情面板。`[` / `]` 切换详情，Tab 切换焦点，Z 放大当前面板并在放大时用 Tab 切换面板，Esc 退出放大。见 [Linux 运维工作台](../examples/linux-workbench.md)。
 
-panel 声明必填 id、exec；可选 title、mode（snapshot 默认/stream）、format（markdown 默认/text/items-json）、open（仅 items-json snapshot 可用，相对路径指向子页）、refresh、timeout、autostart（默认 true）。snapshot 默认超时 5s，refresh 最小 250ms；stream 默认超时 0（不限时），不能设置 refresh 或 items-json。
+panel 声明必填 id、exec；可选 title、mode（snapshot 默认/stream）、format（markdown 默认/text/items-json）、open（仅 items-json snapshot 可用；单个相对路径，或选项 ID 到子页路径的映射）、refresh、timeout、autostart（默认 true）。snapshot 默认超时 5s，refresh 最小 250ms；stream 默认超时 0（不限时），不能设置 refresh 或 items-json。
 
-列表可以通过 `open: ./child.md` 进入子页。子页在 page 块声明 `parent: 列表ID` 后，可用 `{ref: "parent.selected.id"}` 读取父页选中对象。子页全屏显示并拥有独立面板；`Esc` 或 `q` 返回父页，父页的状态和刷新会恢复。`mdtui check` 会递归校验子页、循环引用和 8 层深度限制。示例见 [navigation.md](../examples/navigation.md)。
+列表可以通过 `open: ./child.md` 进入同一个子页，也可以用映射让不同选项打开不同子页：
+
+```text
+open:
+  system: ./system.md
+  network: ./network.md
+```
+
+未出现在映射中的选项不会跳转。子页在 page 块声明 `parent: 列表ID` 后，可用 `{ref: "parent.selected.id"}` 读取父页选中对象。子页全屏显示并拥有独立面板；`Esc` 或 `q` 返回父页，父页的状态和刷新会恢复。`mdtui check` 会递归校验子页、循环引用和 8 层深度限制。示例见 [navigation.md](../examples/navigation.md)。
 
 exec 是非空数组，程序名必须为字面字符串，后续参数只接受字符串或 `{ref: "列表.selected.id"}`、`{ref: "输入.value"}`、`{ref: "parent.selected.id"}`。数字参数必须加引号。引用占整个参数，不支持插值、表达式和 shell 求值。缺失选择/必填输入会阻塞，不会传空值猜测参数。
 

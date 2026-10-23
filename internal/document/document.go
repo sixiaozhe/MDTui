@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,10 +19,41 @@ import (
 type Arg struct{ Literal, Ref string }
 type Panel struct {
 	ID, Title, Mode, Format, Open string
+	OpenByID                      map[string]string
 	Exec                          []Arg
 	Refresh, Timeout              time.Duration
 	Autostart                     bool
 }
+
+func (p Panel) HasOpen() bool { return p.Open != "" || len(p.OpenByID) > 0 }
+
+func (p Panel) OpenTarget(id string) (string, bool) {
+	if len(p.OpenByID) > 0 {
+		target, ok := p.OpenByID[id]
+		return target, ok
+	}
+	return p.Open, p.Open != ""
+}
+
+func (p Panel) OpenTargets() []string {
+	if len(p.OpenByID) == 0 {
+		if p.Open == "" {
+			return nil
+		}
+		return []string{p.Open}
+	}
+	keys := make([]string, 0, len(p.OpenByID))
+	for key := range p.OpenByID {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	targets := make([]string, 0, len(keys))
+	for _, key := range keys {
+		targets = append(targets, p.OpenByID[key])
+	}
+	return targets
+}
+
 type Input struct {
 	ID, Label, Default string
 	Required           bool
@@ -177,8 +209,8 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			}
 		case "panel":
 			c.allowed(b, "id title mode format exec refresh timeout autostart open")
-			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), Open: c.str(b, "open", "", false), Autostart: c.boolean(b, "autostart", true)}
-			v.Open = strings.TrimSpace(v.Open)
+			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), Autostart: c.boolean(b, "autostart", true)}
+			v.Open, v.OpenByID = c.openTargets(b)
 			if v.Mode != "snapshot" && v.Mode != "stream" {
 				c.fail(b.line, "mode", "使用 snapshot 或 stream")
 			}
@@ -188,15 +220,14 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			if v.Mode == "stream" && v.Format == "items-json" {
 				c.fail(b.line, "format", "items-json 只支持 snapshot")
 			}
-			if n, ok := b.fields["open"]; ok && v.Open == "" {
-				c.fail(b.line+n.Line, "open", "路径不能为空")
-			}
-			if v.Open != "" {
+			if v.HasOpen() {
 				if v.Format != "items-json" {
 					c.fail(b.line, "open", "仅 items-json 面板可跳转子页")
 				}
-				if filepath.IsAbs(v.Open) {
-					c.fail(b.line, "open", "使用相对当前页面的路径")
+				for _, target := range v.OpenTargets() {
+					if filepath.IsAbs(target) {
+						c.fail(b.line, "open", "使用相对当前页面的路径")
+					}
 				}
 			}
 			d := "5s"
@@ -398,6 +429,44 @@ func (c *compiler) allowed(b block, keys string) {
 		}
 	}
 }
+func (c *compiler) openTargets(b block) (string, map[string]string) {
+	n, ok := b.fields["open"]
+	if !ok {
+		return "", nil
+	}
+	switch {
+	case n.Kind == yaml.ScalarNode && n.Tag == "!!str":
+		ref := strings.TrimSpace(n.Value)
+		if ref == "" {
+			c.fail(b.line+n.Line, "open", "路径不能为空")
+		}
+		return ref, nil
+	case n.Kind == yaml.MappingNode:
+		targets := map[string]string{}
+		for i := 0; i < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			if key.Tag != "!!str" || key.Kind != yaml.ScalarNode || strings.TrimSpace(key.Value) == "" {
+				c.fail(b.line+key.Line, "open", "选项 ID 必须是非空字符串")
+			}
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+				c.fail(b.line+value.Line, "open."+key.Value, "子页路径必须是字符串")
+			}
+			ref := strings.TrimSpace(value.Value)
+			if ref == "" {
+				c.fail(b.line+value.Line, "open."+key.Value, "路径不能为空")
+			}
+			targets[key.Value] = ref
+		}
+		if len(targets) == 0 {
+			c.fail(b.line, "open", "至少配置一个选项")
+		}
+		return "", targets
+	default:
+		c.fail(b.line, "open", "open 必须是路径字符串或 ID 到路径的映射")
+	}
+	return "", nil
+}
+
 func (c *compiler) str(b block, k, def string, required bool) string {
 	n, ok := b.fields[k]
 	if !ok {

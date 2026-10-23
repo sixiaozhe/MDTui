@@ -362,6 +362,49 @@ func TestPageNavigationPushPop(t *testing.T) {
 	}
 }
 
+func TestOpenMapChoosesDifferentChildren(t *testing.T) {
+	dir := t.TempDir()
+	root := ":::mdtui page\nversion: 1\nid: root\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen:\n  A: ./a.md\n  B: ./b.md\n:::\n"
+	child := func(id string) string {
+		return ":::mdtui page\nversion: 1\nid: " + id + "\nparent: list\n:::\n:::mdtui panel\nid: detail\nautostart: false\nexec: [echo]\n:::\n"
+	}
+	writePage(t, dir, "root.md", root)
+	writePage(t, dir, "a.md", child("a"))
+	writePage(t, dir, "b.md", child("b"))
+	page, err := document.Load(filepath.Join(dir, "root.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := tcell.NewSimulationScreen("UTF-8")
+	s.Init()
+	s.SetSize(120, 40)
+	t.Cleanup(s.Fini)
+	e := scheduler.New(page, runner.OS{}, time.Now)
+	e.Panels["list"].Items = []content.Item{{ID: "A"}, {ID: "B"}, {ID: "C"}}
+	u := New(s, e, false)
+
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "a" {
+		t.Fatalf("A opened %q", u.Engine.Page.ID)
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	u.Engine.Select("list", "B")
+	u.pushChild("list")
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "b" {
+		t.Fatalf("B opened %q", u.Engine.Page.ID)
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	u.Engine.Select("list", "C")
+	u.pushChild("list")
+	if len(u.sessions) != 0 {
+		t.Fatal("unmapped item opened a child")
+	}
+	if !strings.Contains(u.notice, "未配置子页") {
+		t.Fatalf("notice = %q", u.notice)
+	}
+}
+
 func TestPageNavigationQuitKeys(t *testing.T) {
 	u := navUI(t, childPage)
 	u.Engine.Select("list", "A")

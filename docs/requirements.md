@@ -185,7 +185,7 @@ timeout: 5s
 | title | 默认 ID |
 | mode | `snapshot` 或 `stream`，默认 snapshot |
 | format | `markdown`、`text`、`items-json`，默认 markdown |
-| open | 可选，仅 `items-json` snapshot 可用；相对当前页面的子页路径 |
+| open | 可选，仅 `items-json` snapshot 可用；相对路径字符串，或选项 ID 到相对路径的映射 |
 | exec | 非空参数数组；可执行文件只能是字面量字符串 |
 | refresh | 仅 snapshot 可用，完成后等待指定时长再次执行；默认关闭，最小 250ms |
 | timeout | snapshot 默认 5s；stream 默认 0（无限）；0 仅 stream 可用 |
@@ -195,7 +195,7 @@ timeout: 5s
 
 `items-json` 仅支持 snapshot。其他组合超出规范时直接报错。
 
-`open` 让列表选中项进入全屏子页。子页可继续声明 `open`，最多 8 层；`mdtui check` 按绝对路径检测循环、父子声明不一致和深度超限。
+`open` 让列表选中项进入全屏子页。它可以是一个相对路径，也可以把选项 ID 映射到不同相对路径，让不同选项打开不同子页；未映射的选项不会跳转。子页可继续声明 `open`，最多 8 层；`mdtui check` 会跟随所有映射目标，按绝对路径检测循环、父子声明不一致和深度超限。
 
 ### 5.5 引用与依赖
 
