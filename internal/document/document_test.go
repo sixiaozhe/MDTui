@@ -34,6 +34,8 @@ func TestCompilerContracts(t *testing.T) {
 		{"parent-ref", strings.Replace(header, "id: test", "id: test\nparent: list", 1) + ":::mdtui panel\nid: x\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", true},
 		{"parent-ref-without-parent", header + ":::mdtui panel\nid: x\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", false},
 		{"parent-invalid", strings.Replace(header, "id: test", "id: test\nparent: 1bad", 1), false},
+		{"open-empty", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"\"\n:::", false},
+		{"open-blank", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"   \"\n:::", false},
 		{"reserved-key", header + ":::mdtui panel\nid: x\nexec: [echo]\n:::\n:::mdtui action\nid: a\nrun: x\nkey: q\n:::", false},
 	}
 	for _, tc := range cases {

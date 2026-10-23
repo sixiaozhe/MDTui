@@ -187,6 +187,9 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			if v.Mode == "stream" && v.Format == "items-json" {
 				c.fail(b.line, "format", "items-json 只支持 snapshot")
 			}
+			if n, ok := b.fields["open"]; ok && strings.TrimSpace(v.Open) == "" {
+				c.fail(b.line+n.Line, "open", "路径不能为空")
+			}
 			if v.Open != "" {
 				if v.Format != "items-json" {
 					c.fail(b.line, "open", "仅 items-json 面板可跳转子页")
