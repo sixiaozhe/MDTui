@@ -84,7 +84,10 @@ func New(s tcell.Screen, e *scheduler.Engine, noColor bool) *UI {
 func (u *UI) depth() int { return len(u.sessions) + 1 }
 
 func (u *UI) saveSession() session {
-	file, _ := document.Canonical(u.Engine.Page.File)
+	file, err := document.Canonical(u.Engine.Page.File)
+	if err != nil {
+		file = u.Engine.Page.File
+	}
 	return session{
 		Engine:          u.Engine,
 		File:            file,
@@ -127,6 +130,9 @@ func (u *UI) resetView(page *document.Page) {
 	}
 	u.zoom = false
 	u.proseScroll, u.proseX = 0, 0
+	u.draft, u.draftCursor, u.inputX = "", 0, 0
+	u.modalScroll, u.modalX = 0, 0
+	u.proseLines = nil
 	u.notice, u.modal, u.editing, u.searching = "", "", false, false
 	u.searchQuery, u.searchDraft = "", ""
 	u.searchIndex, u.searchFocus = -1, -1
@@ -198,13 +204,24 @@ func (u *UI) popChild() bool {
 	u.restoreSession(last)
 	u.cache = map[string]cached{}
 	u.panelLines = map[string][]string{}
+	u.draft, u.draftCursor, u.inputX = "", 0, 0
+	u.modalScroll, u.modalX = 0, 0
+	u.proseLines = nil
 	u.notice, u.modal, u.editing, u.searching, u.searchDraft = "", "", false, false, ""
 	u.action, u.confirm, u.menu = nil, false, 0
 	u.Engine.Resume()
 	return true
 }
 
+func (u *UI) Close() {
+	u.Engine.Close()
+	for i := len(u.sessions) - 1; i >= 0; i-- {
+		u.sessions[i].Engine.Close()
+	}
+}
+
 func (u *UI) Run(ctx context.Context) error {
+	defer u.Close()
 	events := make(chan tcell.Event, 32)
 	stop := make(chan struct{})
 	defer close(stop)
@@ -803,7 +820,11 @@ func (u *UI) Draw() {
 		u.put(2, 2, w-4, 0, "◆ MDTUI", u.themed(81, -1).Bold(true))
 		u.put(2, 4, w-4, 0, "终端空间不足", u.themed(210, -1).Bold(true))
 		u.put(2, 6, w-4, 0, fmt.Sprintf("当前 %d×%d，需要至少 60×16", w, h), u.themed(245, -1))
-		u.put(2, 8, w-4, 0, "调整窗口尺寸，或按 q 安全退出", u.themed(250, -1))
+		hint := "调整窗口尺寸，或按 q 安全退出"
+		if len(u.sessions) > 0 {
+			hint = "调整窗口尺寸，或按 q 返回上一层"
+		}
+		u.put(2, 8, w-4, 0, hint, u.themed(250, -1))
 		s.Show()
 		return
 	}
