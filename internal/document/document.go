@@ -17,10 +17,10 @@ import (
 
 type Arg struct{ Literal, Ref string }
 type Panel struct {
-	ID, Title, Mode, Format string
-	Exec                    []Arg
-	Refresh, Timeout        time.Duration
-	Autostart               bool
+	ID, Title, Mode, Format, Open string
+	Exec                          []Arg
+	Refresh, Timeout              time.Duration
+	Autostart                     bool
 }
 type Input struct {
 	ID, Label, Default string
@@ -32,11 +32,11 @@ type Action struct {
 	Refresh                      []string
 }
 type Page struct {
-	File, Dir, ID, Title, Layout, Sidebar, Markdown string
-	MaxParallel                                     int
-	Panels                                          []Panel
-	Inputs                                          []Input
-	Actions                                         []Action
+	File, Dir, ID, Title, Layout, Sidebar, Parent, Markdown string
+	MaxParallel                                             int
+	Panels                                                  []Panel
+	Inputs                                                  []Input
+	Actions                                                 []Action
 }
 type block struct {
 	kind   string
@@ -153,7 +153,7 @@ func Parse(file string, data []byte) (p *Page, err error) {
 		c.ids[id] = true
 		switch b.kind {
 		case "page":
-			c.allowed(b, "version id title layout sidebar max_parallel")
+			c.allowed(b, "version id title layout sidebar parent max_parallel")
 			if index != 0 {
 				c.fail(b.line, "page", "每页只能有一个 page 块")
 			}
@@ -164,6 +164,10 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			p.Title = c.str(b, "title", id, false)
 			p.Layout = c.str(b, "layout", "stack", false)
 			p.Sidebar = c.str(b, "sidebar", "", false)
+			p.Parent = c.str(b, "parent", "", false)
+			if p.Parent != "" && !identifier.MatchString(p.Parent) {
+				c.fail(b.line, "parent", "使用字母开头的 1～64 位 ASCII 标识")
+			}
 			p.MaxParallel = c.integer(b, "max_parallel", 2)
 			if p.Layout != "stack" && p.Layout != "master-detail" && p.Layout != "workspace" {
 				c.fail(b.line, "layout", "使用 stack、master-detail 或 workspace")
@@ -172,8 +176,8 @@ func Parse(file string, data []byte) (p *Page, err error) {
 				c.fail(b.line, "max_parallel", "取值范围 1～8")
 			}
 		case "panel":
-			c.allowed(b, "id title mode format exec refresh timeout autostart")
-			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), Autostart: c.boolean(b, "autostart", true)}
+			c.allowed(b, "id title mode format exec refresh timeout autostart open")
+			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), Open: c.str(b, "open", "", false), Autostart: c.boolean(b, "autostart", true)}
 			if v.Mode != "snapshot" && v.Mode != "stream" {
 				c.fail(b.line, "mode", "使用 snapshot 或 stream")
 			}
@@ -182,6 +186,14 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			}
 			if v.Mode == "stream" && v.Format == "items-json" {
 				c.fail(b.line, "format", "items-json 只支持 snapshot")
+			}
+			if v.Open != "" {
+				if v.Format != "items-json" {
+					c.fail(b.line, "open", "仅 items-json 面板可跳转子页")
+				}
+				if filepath.IsAbs(v.Open) {
+					c.fail(b.line, "open", "使用相对当前页面的路径")
+				}
 			}
 			d := "5s"
 			if v.Mode == "stream" {
@@ -299,8 +311,11 @@ func Parse(file string, data []byte) (p *Page, err error) {
 					graph[v.ID] = append(graph[v.ID], x.ID)
 				}
 			}
+			if len(parts) == 3 && parts[0] == "parent" && parts[1] == "selected" && parts[2] == "id" && p.Parent != "" {
+				valid = true
+			}
 			if !valid {
-				c.fail(lineOf(v.ID), "exec.ref", "无效引用 "+a.Ref+"；使用列表.selected.id 或输入.value")
+				c.fail(lineOf(v.ID), "exec.ref", "无效引用 "+a.Ref+"；使用列表.selected.id、输入.value 或 parent.selected.id")
 			}
 		}
 	}
