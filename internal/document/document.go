@@ -20,6 +20,7 @@ type Arg struct{ Literal, Ref string }
 type Panel struct {
 	ID, Title, Mode, Format, Open string
 	OpenByID                      map[string]string
+	OnFocus, OnSelect             string
 	Exec                          []Arg
 	Refresh, Timeout              time.Duration
 	Autostart                     bool
@@ -208,8 +209,8 @@ func Parse(file string, data []byte) (p *Page, err error) {
 				c.fail(b.line, "max_parallel", "取值范围 1～8")
 			}
 		case "panel":
-			c.allowed(b, "id title mode format exec refresh timeout autostart open")
-			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), Autostart: c.boolean(b, "autostart", true)}
+			c.allowed(b, "id title mode format exec refresh timeout autostart open on_focus on_select")
+			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), OnFocus: c.str(b, "on_focus", "", false), OnSelect: c.str(b, "on_select", "", false), Autostart: c.boolean(b, "autostart", true)}
 			v.Open, v.OpenByID = c.openTargets(b)
 			if v.Mode != "snapshot" && v.Mode != "stream" {
 				c.fail(b.line, "mode", "使用 snapshot 或 stream")
@@ -343,7 +344,7 @@ func Parse(file string, data []byte) (p *Page, err error) {
 				if len(parts) == 2 && parts[1] == "value" && inputs[parts[0]] {
 					valid = true
 				}
-				if len(parts) == 3 && parts[1] == "selected" && parts[2] == "id" {
+				if len(parts) == 3 && (parts[1] == "selected" || parts[1] == "cursor") && parts[2] == "id" {
 					if x, ok := panels[parts[0]]; ok && x.Format == "items-json" {
 						valid = true
 						graph[v.ID] = append(graph[v.ID], x.ID)
@@ -351,7 +352,7 @@ func Parse(file string, data []byte) (p *Page, err error) {
 				}
 			}
 			if !valid {
-				c.fail(lineOf(v.ID), "exec.ref", "无效引用 "+a.Ref+"；使用列表.selected.id、输入.value 或 parent.selected.id")
+				c.fail(lineOf(v.ID), "exec.ref", "无效引用 "+a.Ref+"；使用列表.selected.id、列表.cursor.id、输入.value 或 parent.selected.id")
 			}
 		}
 	}
@@ -374,7 +375,9 @@ func Parse(file string, data []byte) (p *Page, err error) {
 		visit(id)
 	}
 	keys := map[string]bool{}
+	actions := map[string]Action{}
 	for _, a := range p.Actions {
+		actions[a.ID] = a
 		if a.Key != "" {
 			if keys[a.Key] {
 				c.fail(lineOf(a.ID), "key", "重复快捷键，请更换")
@@ -390,6 +393,31 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			if !ok || (a.Run == "" && v.Mode != "snapshot") {
 				c.fail(lineOf(a.ID), "action.target", "目标必须存在，refresh 只支持 snapshot")
 			}
+		}
+	}
+	for _, panel := range p.Panels {
+		check := func(field, id string) {
+			if id == "" {
+				return
+			}
+			action, ok := actions[id]
+			if !ok {
+				c.fail(lineOf(panel.ID), field, "动作不存在: "+id)
+			}
+			if action.Confirm != "" {
+				c.fail(lineOf(panel.ID), field, "自动触发动作不能设置 confirm")
+			}
+		}
+		check("on_focus", panel.OnFocus)
+		check("on_select", panel.OnSelect)
+		if panel.OnFocus != "" && panel.Format != "items-json" {
+			c.fail(lineOf(panel.ID), "on_focus", "仅 items-json 面板可绑定焦点事件")
+		}
+		if panel.OnSelect != "" && panel.Format != "items-json" {
+			c.fail(lineOf(panel.ID), "on_select", "仅 items-json 面板可绑定选中事件")
+		}
+		if panel.OnSelect != "" && panel.HasOpen() {
+			c.fail(lineOf(panel.ID), "on_select", "on_select 与 open 不能同时使用")
 		}
 	}
 	return p, nil

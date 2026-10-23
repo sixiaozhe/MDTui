@@ -94,6 +94,34 @@ func Topics() string {
 	return string(data)
 }
 
+func Explain(id string) (string, error) {
+	if !validTopic(id) {
+		return "", fmt.Errorf("未知类别 %q", id)
+	}
+	title, sections := topicSections(id)
+	var out strings.Builder
+	fmt.Fprintf(&out, "# %s · 采集计划\n\n按 Enter 后执行下列命令。\n\n| 步骤 | 首选命令 | 备选命令 |\n| --- | --- | --- |\n", title)
+	for _, section := range sections {
+		primary, fallback := "—", "—"
+		if len(section.attempts) > 0 {
+			primary = commandText(section.attempts[0])
+		}
+		if len(section.attempts) > 1 {
+			var alternatives []string
+			for _, attempt := range section.attempts[1:] {
+				alternatives = append(alternatives, commandText(attempt))
+			}
+			fallback = strings.Join(alternatives, "；")
+		}
+		fmt.Fprintf(&out, "| %s | `%s` | `%s` |\n", section.title, primary, fallback)
+	}
+	return out.String(), nil
+}
+
+func commandText(attempt invocation) string {
+	return strings.Join(append([]string{attempt.program}, attempt.args...), " ")
+}
+
 func validTopic(id string) bool {
 	for _, topic := range topics {
 		if topic.id == id {

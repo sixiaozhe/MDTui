@@ -624,3 +624,48 @@ func TestCloseStopsChildEngine(t *testing.T) {
 		t.Fatal("child job did not stop")
 	}
 }
+
+func TestOnItemFocusActionTriggers(t *testing.T) {
+	u := testUI(t)
+	u.Engine.Page.Panels[0].OnFocus = "preview"
+	u.Engine.Panels["list"].Definition.OnFocus = "preview"
+	u.Engine.Page.Actions = append(u.Engine.Page.Actions, document.Action{ID: "preview", Run: "list"})
+	if u.Engine.Panels["list"].Request != 0 {
+		t.Fatal("list ran before cursor moved")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyDown, 0, 0))
+	if u.Engine.Panels["list"].Request == 0 {
+		t.Fatal("cursor move did not run bound action")
+	}
+}
+
+func TestOnItemFocusTriggersForInitialItem(t *testing.T) {
+	u := testUI(t)
+	u.Engine.Page.Panels[0].OnFocus = "preview"
+	u.Engine.Panels["list"].Definition.OnFocus = "preview"
+	u.Engine.Page.Actions = append(u.Engine.Page.Actions, document.Action{ID: "preview", Run: "list"})
+	u.syncItemFocus()
+	if u.Engine.Panels["list"].Request == 0 {
+		t.Fatal("initial item did not run bound action")
+	}
+	before := u.Engine.Panels["list"].Request
+	u.syncItemFocus()
+	if u.Engine.Panels["list"].Request != before {
+		t.Fatal("same item ran bound action twice")
+	}
+}
+
+func TestOnSelectActionTriggers(t *testing.T) {
+	u := testUI(t)
+	u.Engine.Page.Panels[0].OnSelect = "inspect"
+	u.Engine.Panels["list"].Definition.OnSelect = "inspect"
+	u.Engine.Page.Actions = append(u.Engine.Page.Actions, document.Action{ID: "inspect", Run: "detail"})
+	u.Key(tcell.NewEventKey(tcell.KeyDown, 0, 0))
+	if u.Engine.Panels["detail"].Request != 0 {
+		t.Fatal("cursor move ran bound action")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if u.Engine.Panels["detail"].Request == 0 {
+		t.Fatal("selection did not run bound action")
+	}
+}

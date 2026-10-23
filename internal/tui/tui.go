@@ -40,6 +40,7 @@ type UI struct {
 	workspaceDetail          string
 	sessions                 []session
 	opened                   map[string]string
+	focusedItem              map[string]string
 }
 
 type session struct {
@@ -78,7 +79,7 @@ func New(s tcell.Screen, e *scheduler.Engine, noColor bool) *UI {
 			break
 		}
 	}
-	return &UI{Screen: s, Engine: e, NoColor: noColor, focus: focus, workspaceDetail: detail, searchIndex: -1, searchFocus: -1, cache: map[string]cached{}, panelLines: map[string][]string{}, opened: map[string]string{}}
+	return &UI{Screen: s, Engine: e, NoColor: noColor, focus: focus, workspaceDetail: detail, searchIndex: -1, searchFocus: -1, cache: map[string]cached{}, panelLines: map[string][]string{}, opened: map[string]string{}, focusedItem: map[string]string{}}
 }
 
 func (u *UI) depth() int { return len(u.sessions) + 1 }
@@ -139,6 +140,7 @@ func (u *UI) resetView(page *document.Page) {
 	u.action, u.confirm, u.menu = nil, false, 0
 	u.cache = map[string]cached{}
 	u.panelLines = map[string][]string{}
+	u.focusedItem = map[string]string{}
 }
 
 func (u *UI) pushChild(panelID string) {
@@ -209,6 +211,7 @@ func (u *UI) popChild() bool {
 	u.restoreSession(last)
 	u.cache = map[string]cached{}
 	u.panelLines = map[string][]string{}
+	u.focusedItem = map[string]string{}
 	u.draft, u.draftCursor, u.inputX = "", 0, 0
 	u.modalScroll, u.modalX = 0, 0
 	u.proseLines = nil
@@ -245,6 +248,7 @@ func (u *UI) Run(ctx context.Context) error {
 		}
 	}()
 	u.Engine.Start()
+	u.syncItemFocus()
 	u.Draw()
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
@@ -263,15 +267,18 @@ func (u *UI) Run(ctx context.Context) error {
 				if u.Key(v) {
 					return nil
 				}
+				u.syncItemFocus()
 			case *tcell.EventResize:
 				u.Screen.Sync()
 			}
 			u.Draw()
 		case ev := <-u.Engine.Events:
 			u.Engine.Consume(ev)
+			u.syncItemFocus()
 			u.Draw()
 		case <-tick.C:
 			if u.Engine.Tick() {
+				u.syncItemFocus()
 				u.Draw()
 			}
 		}
@@ -306,6 +313,41 @@ func (u *UI) moveFocus(step int) {
 	}
 	if p := u.panel(); p != nil && p.Definition.ID != u.Engine.Page.Sidebar {
 		u.workspaceDetail = p.Definition.ID
+	}
+	u.syncItemFocus()
+}
+
+func (u *UI) syncItemFocus() {
+	if u.modal != "" || u.searching || u.editing {
+		return
+	}
+	p := u.panel()
+	if p == nil || p.Definition.Format != "items-json" || p.Definition.OnFocus == "" {
+		return
+	}
+	if len(p.Items) == 0 {
+		delete(u.focusedItem, p.Definition.ID)
+		return
+	}
+	index := min(max(p.Cursor, 0), len(p.Items)-1)
+	id := p.Items[index].ID
+	if u.focusedItem[p.Definition.ID] == id {
+		return
+	}
+	u.focusedItem[p.Definition.ID] = id
+	u.Engine.Cursor(p.Definition.ID)
+	u.triggerAction(p.Definition.OnFocus)
+}
+
+func (u *UI) triggerAction(id string) {
+	if id == "" {
+		return
+	}
+	for _, action := range u.Engine.Page.Actions {
+		if action.ID == id {
+			u.perform(action)
+			return
+		}
 	}
 }
 func (u *UI) selectWorkspaceView(source string) {
@@ -478,6 +520,7 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 			u.selectWorkspaceView(p.Definition.ID)
 			if p.Selected != before {
 				delete(u.opened, p.Definition.ID)
+				u.triggerAction(p.Definition.OnSelect)
 			}
 			if p.Definition.HasOpen() && p.Selected != "" {
 				u.pushChild(p.Definition.ID)
@@ -623,6 +666,7 @@ func (u *UI) scroll(key tcell.Key) {
 	}
 	if p != nil && p.Definition.Format == "items-json" {
 		p.Cursor = min(p.Cursor, max(0, len(p.Items)-1))
+		u.syncItemFocus()
 	}
 }
 func (u *UI) style(active bool) tcell.Style {

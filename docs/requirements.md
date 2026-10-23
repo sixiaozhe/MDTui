@@ -190,6 +190,8 @@ timeout: 5s
 | refresh | 仅 snapshot 可用，完成后等待指定时长再次执行；默认关闭，最小 250ms |
 | timeout | snapshot 默认 5s；stream 默认 0（无限）；0 仅 stream 可用 |
 | autostart | 默认 true；false 的面板仍声明命令，但等待动作触发 |
+| on_focus | 可选；items-json 列表的光标移动到某一项时触发的 action ID |
+| on_select | 可选；items-json 列表确认选择变化时触发的 action ID；不能与 open 同时使用 |
 
 `exec` 参数只能是字符串或只有 `ref` 一个键的映射。禁止隐式将数字、布尔值转换成参数；需要数字参数时显式使用字符串。
 
@@ -197,11 +199,14 @@ timeout: 5s
 
 `open` 让列表选中项进入全屏子页。它可以是一个相对路径，也可以把选项 ID 映射到不同相对路径，让不同选项打开不同子页；未映射的选项不会跳转。子页可继续声明 `open`，最多 8 层；`mdtui check` 会跟随所有映射目标，按绝对路径检测循环、父子声明不一致和深度超限。
 
+`on_focus` 和 `on_select` 引用一个 action ID。列表获得焦点后，光标移动到新的选项时触发 `on_focus`；页面初始加载时，聚焦列表的首个光标项也会触发一次。列表按 Enter 真正改变选中值时触发 `on_select`。刷新本身不触发；只有光标所在项的 ID 发生变化时才再次触发 `on_focus`。自动触发动作不能设置 `confirm`；两个事件都只能用于 items-json 面板，`on_select` 不能与 `open` 同时使用。
+
 ### 5.5 引用与依赖
 
-支持三类引用：
+支持四类引用：
 
 - `<panel-id>.selected.id`：可选列表当前确认对象的稳定 ID。
+- `<panel-id>.cursor.id`：可选列表当前光标所在项的 ID，不要求按 Enter 确认。
 - `parent.selected.id`：父页面中触发当前子页的列表当前选中 ID；仅子页声明 `parent` 后可用。
 - `<input-id>.value`：文本输入控件当前提交的值。
 

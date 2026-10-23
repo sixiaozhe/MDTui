@@ -99,6 +99,18 @@ func (e *Engine) Args(id string) ([]string, string) {
 			result = append(result, e.ParentSelected)
 			continue
 		}
+		if len(parts) == 3 && parts[1] == "cursor" && parts[2] == "id" {
+			list := e.Panels[parts[0]]
+			if list == nil || list.Definition.Format != "items-json" {
+				return nil, "无效引用: " + a.Ref
+			}
+			if len(list.Items) == 0 {
+				return nil, "列表为空: " + parts[0]
+			}
+			index := min(max(list.Cursor, 0), len(list.Items)-1)
+			result = append(result, list.Items[index].ID)
+			continue
+		}
 		if len(parts) == 2 {
 			value := e.Inputs[parts[0]]
 			for _, input := range e.Page.Inputs {
@@ -275,7 +287,7 @@ func (e *Engine) Consume(ev Event) {
 					}
 					if !found {
 						p.Selected = ""
-						e.invalidate(p.Definition.ID)
+						e.invalidateKind(p.Definition.ID, "selected")
 					}
 				}
 			}
@@ -362,7 +374,7 @@ func (e *Engine) Select(id, value string) {
 		return
 	}
 	p.Selected = value
-	e.invalidate(id)
+	e.invalidateKind(id, "selected")
 	e.dispatch()
 }
 func (e *Engine) Submit(id, value string) {
@@ -370,14 +382,30 @@ func (e *Engine) Submit(id, value string) {
 		return
 	}
 	e.Inputs[id] = value
-	e.invalidate(id)
+	e.invalidateKind(id, "value")
 	e.dispatch()
 }
-func (e *Engine) invalidate(source string) {
+func (e *Engine) Cursor(id string) {
+	e.invalidateKind(id, "cursor")
+	e.dispatch()
+}
+func (e *Engine) invalidateKind(source, kind string) {
 	// Compute transitive closure first, then clear every selection before resolving.
+	prefix := source + "." + kind
 	affected := map[string]bool{}
-	var visit func(string)
-	visit = func(src string) {
+	for _, d := range e.Page.Panels {
+		for _, a := range d.Exec {
+			if e.Page.Parent != "" && a.Ref == "parent.selected.id" {
+				continue
+			}
+			if strings.HasPrefix(a.Ref, prefix) {
+				affected[d.ID] = true
+				break
+			}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
 		for _, d := range e.Page.Panels {
 			if affected[d.ID] {
 				continue
@@ -386,15 +414,15 @@ func (e *Engine) invalidate(source string) {
 				if e.Page.Parent != "" && a.Ref == "parent.selected.id" {
 					continue
 				}
-				if strings.HasPrefix(a.Ref, src+".") {
+				parts := strings.SplitN(a.Ref, ".", 2)
+				if len(parts) == 2 && affected[parts[0]] {
 					affected[d.ID] = true
-					visit(d.ID)
+					changed = true
 					break
 				}
 			}
 		}
 	}
-	visit(source)
 	for id := range affected {
 		p := e.Panels[id]
 		p.Generation++

@@ -777,3 +777,38 @@ func TestPauseDoesNotRestartInvalidatedManualPanel(t *testing.T) {
 		t.Fatalf("status = %q", s)
 	}
 }
+
+func TestCursorReferenceAndInvalidation(t *testing.T) {
+	f := &fake{make(chan call, 8)}
+	p := &document.Page{MaxParallel: 2, Panels: []document.Panel{
+		{ID: "list", Mode: "snapshot", Format: "items-json", Autostart: true, Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "preview", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "list.cursor.id"}}},
+	}}
+	e := New(p, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"A"},{"id":"B","label":"B"}]}`)
+	if e.Panels["preview"].Status != "blocked" {
+		t.Fatal("preview ran before cursor was available")
+	}
+	e.Panels["list"].Cursor = 1
+	e.Cursor("list")
+	first := receive(t, f)
+	if len(first.spec.Args) != 2 || first.spec.Args[1] != "B" {
+		t.Fatal(first.spec.Args)
+	}
+	finish(t, e, first, "B")
+	e.Select("list", "A")
+	if e.Panels["preview"].Text != "B" {
+		t.Fatal("selection invalidated cursor preview")
+	}
+	e.Panels["list"].Cursor = 0
+	e.Cursor("list")
+	second := receive(t, f)
+	if len(second.spec.Args) != 2 || second.spec.Args[1] != "A" {
+		t.Fatal(second.spec.Args)
+	}
+	finish(t, e, second, "A")
+	if e.Panels["preview"].Text != "A" {
+		t.Fatal(e.Panels["preview"].Text)
+	}
+}

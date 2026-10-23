@@ -42,6 +42,15 @@ func TestCompilerContracts(t *testing.T) {
 		{"open-map-non-string", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: {system: 1}\n:::", false},
 		{"open-map-empty", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: {}\n:::", false},
 		{"open-map-wrong-format", header + ":::mdtui panel\nid: list\nexec: [echo]\nopen: {system: ./system.md}\n:::", false},
+		{"on-select-valid", header + ":::mdtui panel\nid: list\nformat: items-json\non_select: inspect\nexec: [echo]\n:::\n:::mdtui action\nid: inspect\nrun: list\n:::", true},
+		{"on-focus-valid", header + ":::mdtui panel\nid: list\nformat: items-json\non_focus: refresh_list\nexec: [echo]\n:::\n:::mdtui action\nid: refresh_list\nrefresh: [list]\n:::", true},
+		{"on-focus-not-items", header + ":::mdtui panel\nid: detail\non_focus: refresh_detail\nexec: [echo]\n:::\n:::mdtui action\nid: refresh_detail\nrefresh: [detail]\n:::", false},
+		{"on-select-not-items", header + ":::mdtui panel\nid: detail\non_select: inspect\nexec: [echo]\n:::\n:::mdtui action\nid: inspect\nrun: detail\n:::", false},
+		{"cursor-ref-valid", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\n:::\n:::mdtui panel\nid: preview\nexec: [echo, {ref: 'list.cursor.id'}]\n:::", true},
+		{"cursor-ref-not-list", header + ":::mdtui panel\nid: detail\nexec: [echo]\n:::\n:::mdtui panel\nid: preview\nexec: [echo, {ref: 'detail.cursor.id'}]\n:::", false},
+		{"on-select-unknown-action", header + ":::mdtui panel\nid: list\nformat: items-json\non_select: missing\nexec: [echo]\n:::", false},
+		{"on-select-confirm", header + ":::mdtui panel\nid: list\nformat: items-json\non_select: inspect\nexec: [echo]\n:::\n:::mdtui action\nid: inspect\nrun: list\nconfirm: \"确认？\"\n:::", false},
+		{"on-select-open", header + ":::mdtui panel\nid: list\nformat: items-json\non_select: inspect\nopen: ./child.md\nexec: [echo]\n:::\n:::mdtui action\nid: inspect\nrun: list\n:::", false},
 		{"reserved-key", header + ":::mdtui panel\nid: x\nexec: [echo]\n:::\n:::mdtui action\nid: a\nrun: x\nkey: q\n:::", false},
 	}
 	for _, tc := range cases {

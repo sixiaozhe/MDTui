@@ -13,6 +13,7 @@ bash scripts/build.sh
 ./bin/mdtui check examples/input.md >> docs/evidence/check.txt
 ./bin/mdtui check examples/linux-workbench.md >> docs/evidence/check.txt
 ./bin/mdtui check examples/navigation.md >> docs/evidence/check.txt
+./bin/mdtui check examples/inspection.md >> docs/evidence/check.txt
 python3 tests/integration/cli_test.py > docs/evidence/cli.json
 python3 tests/integration/pty_test.py > docs/evidence/pty.json
 python3 tests/integration/linux_workbench_test.py > docs/evidence/linux-workbench.json

@@ -1,6 +1,6 @@
 # 页面作者指南
 
-完整字段契约见 [需求基线第 5 节](requirements.md)。可复制 [network.md](../examples/network.md) 或 [input.md](../examples/input.md) 开始编写。
+完整语法参考见 [syntax.md](syntax.md)，完整字段契约见 [需求基线第 5 节](requirements.md)。可复制 [network.md](../examples/network.md) 或 [input.md](../examples/input.md) 开始编写。
 
 所有扩展从第 1 列的 `:::mdtui TYPE` 开始，单独一行 `:::` 结束。围栏代码块中的声明只显示，不执行。普通 Markdown 合并成页面上方说明区。
 
@@ -19,7 +19,7 @@ max_parallel: 2
 
 任务较多时可用 `layout: workspace` 和 `sidebar: 列表面板ID`。宽终端左侧保留列表、右侧一次显示一个详情面板；窄终端显示当前焦点面板。列表选中对象后，工作区会自动显示首个引用该列表的详情面板。`[` / `]` 切换详情，Tab 切换焦点，Z 放大当前面板并在放大时用 Tab 切换面板，Esc 退出放大。见 [Linux 运维工作台](../examples/linux-workbench.md)。
 
-panel 声明必填 id、exec；可选 title、mode（snapshot 默认/stream）、format（markdown 默认/text/items-json）、open（仅 items-json snapshot 可用；单个相对路径，或选项 ID 到子页路径的映射）、refresh、timeout、autostart（默认 true）。snapshot 默认超时 5s，refresh 最小 250ms；stream 默认超时 0（不限时），不能设置 refresh 或 items-json。
+panel 声明必填 id、exec；可选 title、mode（snapshot 默认/stream）、format（markdown 默认/text/items-json）、open（仅 items-json snapshot 可用；单个相对路径，或选项 ID 到子页路径的映射）、on_focus、on_select、refresh、timeout、autostart（默认 true）。snapshot 默认超时 5s，refresh 最小 250ms；stream 默认超时 0（不限时），不能设置 refresh 或 items-json。
 
 列表可以通过 `open: ./child.md` 进入同一个子页，也可以用映射让不同选项打开不同子页：
 
@@ -31,7 +31,43 @@ open:
 
 未出现在映射中的选项不会跳转。子页在 page 块声明 `parent: 列表ID` 后，可用 `{ref: "parent.selected.id"}` 读取父页选中对象。子页全屏显示并拥有独立面板；`Esc` 或 `q` 返回父页，父页的状态和刷新会恢复。`mdtui check` 会递归校验子页、循环引用和 8 层深度限制。示例见 [navigation.md](../examples/navigation.md)。
 
-exec 是非空数组，程序名必须为字面字符串，后续参数只接受字符串或 `{ref: "列表.selected.id"}`、`{ref: "输入.value"}`、`{ref: "parent.selected.id"}`。数字参数必须加引号。引用占整个参数，不支持插值、表达式和 shell 求值。缺失选择/必填输入会阻塞，不会传空值猜测参数。
+`on_focus` 和 `on_select` 绑定已有 action，用于区分“列表项获得焦点”和“选项被确认”：
+
+```text
+:::mdtui action
+id: preview
+run: preview
+:::
+
+:::mdtui action
+id: inspect
+run: detail
+:::
+
+:::mdtui panel
+id: list
+format: items-json
+on_focus: preview
+on_select: inspect
+exec: ["adapter", "list"]
+:::
+
+:::mdtui panel
+id: preview
+autostart: false
+exec: ["adapter", "show", {ref: "list.cursor.id"}]
+:::
+
+:::mdtui panel
+id: detail
+autostart: false
+exec: ["adapter", "inspect", {ref: "list.selected.id"}]
+:::
+```
+
+`on_focus` 在列表光标移动到新的选项时触发；页面初始加载时，聚焦列表的首个光标项也会触发一次。`on_select` 仅在列表按 Enter 改变选中值时触发。刷新本身不触发，只有光标项 ID 变化才会再次触发 `on_focus`。自动触发动作不能设置 `confirm`，两个事件都只能用于 items-json 面板，`on_select` 不能与 `open` 同时使用。可运行示例见 [inspection.md](../examples/inspection.md)。
+
+exec 是非空数组，程序名必须为字面字符串，后续参数只接受字符串或 `{ref: "列表.selected.id"}`、`{ref: "列表.cursor.id"}`、`{ref: "输入.value"}`、`{ref: "parent.selected.id"}`。数字参数必须加引号。引用占整个参数，不支持插值、表达式和 shell 求值。缺失选择/必填输入会阻塞，不会传空值猜测参数。
 
 input 的字段为 id、label（默认 ID）、default（默认空串）、required（默认 false）、max_length（默认 256，1～4096 Unicode 码点）。单行输入支持末尾追加和 Backspace；编辑草稿与提交值独立。不用于密码。
 

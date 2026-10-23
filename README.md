@@ -35,7 +35,7 @@ bash scripts/build.sh
 
 另有 [模拟网络调试页面](examples/network.md)，可在没有设备和网络权限的环境中练习对象选择、刷新与流式诊断；[输入参数示例](examples/input.md) 展示表单交互。
 
-[页面跳转示例](examples/navigation.md) 演示按运维主题打开不同的全屏子页，并在子页读取父页选中的对象；每个主题页可以拥有自己的布局、输入、动作和流式面板。
+[页面跳转示例](examples/navigation.md) 演示按运维主题打开不同的全屏子页，并在子页读取父页选中的对象；每个主题页可以拥有自己的布局、输入、动作和流式面板。[巡检台示例](examples/inspection.md) 演示 `on_focus` 与 `on_select`：光标移到巡检主题时预览采集计划，按 Enter 确认后才执行完整详情。
 
 通过 SSH 使用时，需要分配 PTY，例如 `ssh -t user@device`，再在设备上运行已部署的 `mdtui PAGE.md`。构建与文件摆放方式见[部署指南](docs/build.md)。
 
@@ -83,7 +83,7 @@ exec: ["./adapter", "show", {ref: "interfaces.selected.id"}]
 :::
 ```
 
-列表命令返回带稳定 `id` 的 `items-json`，详情命令可返回 Markdown。页面还支持输入、动作、确认框、定时刷新和流式面板。完整语法与约束见[页面作者指南](docs/author.md)及[命令适配指南](docs/adapter.md)。
+列表命令返回带稳定 `id` 的 `items-json`，详情命令可返回 Markdown。页面还支持输入、动作、确认框、定时刷新和流式面板。完整语法与约束见[语法参考](docs/syntax.md)、[页面作者指南](docs/author.md)及[命令适配指南](docs/adapter.md)。
 
 ## 项目结构与验证
 

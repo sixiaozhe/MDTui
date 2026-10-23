@@ -60,3 +60,18 @@ func TestNonzeroStatusShowsUsefulOutput(t *testing.T) {
 		t.Fatalf("lost command output: %q, %v", result, err)
 	}
 }
+
+func TestExplainListsCommandsWithoutExecuting(t *testing.T) {
+	out, err := Explain("network")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"网络与端口 · 采集计划", "ip -br addr", "ss -tuln"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %s", want, out)
+		}
+	}
+	if _, err := Explain("missing"); err == nil {
+		t.Fatal("accepted unknown topic")
+	}
+}
