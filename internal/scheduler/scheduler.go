@@ -26,6 +26,7 @@ type Panel struct {
 	Duration                                        time.Duration
 	pending, queued                                 bool
 	queuedRun, pendingRun                           bool
+	pausedOnce                                      bool
 	active                                          *job
 }
 type job struct {
@@ -206,6 +207,7 @@ func (e *Engine) dispatch() {
 		ctx, cancel := context.WithCancel(context.Background())
 		j := &job{request: e.sequence, generation: p.Generation, cancel: cancel, buffer: &content.Buffer{}, once: p.queuedRun}
 		p.queuedRun = false
+		p.pausedOnce = false
 		p.active = j
 		p.Request = j.request
 		p.Status = "running"
@@ -495,16 +497,35 @@ func (e *Engine) Pause() {
 	e.paused = true
 	e.queue = nil
 	for _, p := range e.Panels {
+		if p.active != nil && p.active.once {
+			p.pausedOnce = true
+		}
+		if p.queuedRun {
+			p.pausedOnce = true
+		}
 		p.Due = time.Time{}
 		p.pending = false
 		p.queuedRun, p.pendingRun = false, false
 		p.queued = false
+		if p.Status == "queued" {
+			e.settleStatus(p)
+		}
 		if p.active != nil {
 			p.active.cancel()
 		}
 	}
 	for e.running > 0 {
 		e.consumePaused(<-e.Events)
+	}
+}
+
+func (e *Engine) settleStatus(p *Panel) {
+	if p.Status == "running" || p.Status == "queued" {
+		if len(p.Items) > 0 || p.Text != "" {
+			p.Status = "ready"
+		} else {
+			p.Status = "idle"
+		}
 	}
 }
 
@@ -516,13 +537,7 @@ func (e *Engine) consumePaused(ev Event) {
 	p.active.cancel()
 	p.active = nil
 	e.running--
-	if p.Status == "running" || p.Status == "queued" {
-		if len(p.Items) > 0 || p.Text != "" {
-			p.Status = "ready"
-		} else {
-			p.Status = "idle"
-		}
-	}
+	e.settleStatus(p)
 }
 
 // Resume 重启暂停前在运行的周期刷新和自动 stream。
@@ -541,6 +556,10 @@ func (e *Engine) Resume() {
 		if def.Refresh > 0 && (p.Status == "ready" || p.Status == "error") {
 			restart = true
 		}
+		if p.pausedOnce {
+			restart = false
+		}
+		p.pausedOnce = false
 		if restart {
 			e.enqueue(p)
 		}

@@ -412,3 +412,50 @@ func TestPauseDoesNotRerunOneShot(t *testing.T) {
 		t.Fatal("one-shot reran after resume")
 	}
 }
+
+func TestPauseDoesNotRestartOneShotRefresh(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Run("detail")
+	c := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	c.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("one-shot with refresh reran after resume")
+	}
+	if s := e.Panels["detail"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
+
+func TestPauseSettlesQueuedRefresh(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "q", Mode: "snapshot", Refresh: time.Second, Autostart: true, Exec: []document.Arg{{Literal: "echo"}}}}}
+	e := New(p, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), "old")
+	q := e.Panels["q"]
+	q.Status = "queued"
+	q.queued = true
+	e.queue = append(e.queue, "q")
+	e.Pause()
+	if q.Status != "ready" {
+		t.Fatalf("status = %q", q.Status)
+	}
+	e.Resume()
+	finish(t, e, receive(t, f), "new")
+	if q.Text != "new" {
+		t.Fatal(q.Text)
+	}
+}
