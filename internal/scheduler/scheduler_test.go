@@ -578,3 +578,63 @@ func TestPauseDoesNotRestartCancelBeforeDrain(t *testing.T) {
 		t.Fatalf("status = %q", s)
 	}
 }
+
+func TestPauseResumesPendingRegularAfterOneShot(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}}}}}
+	e := New(page, f, time.Now)
+	e.Start()
+	e.Run("detail")
+	first := receive(t, f)
+	if reason := e.Request("detail"); reason == "" {
+		t.Fatal("request not coalesced")
+	}
+	p := e.Panels["detail"]
+	if !p.pending || p.pendingRun {
+		t.Fatalf("pending = %v pendingRun = %v", p.pending, p.pendingRun)
+	}
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	first.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	finish(t, e, receive(t, f), "ok")
+	if p.Text != "ok" {
+		t.Fatal(p.Text)
+	}
+}
+
+func TestPauseResumesPendingRegularAfterOneShotSuccess(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}}}}}
+	e := New(page, f, time.Now)
+	e.Start()
+	e.Run("detail")
+	first := receive(t, f)
+	if reason := e.Request("detail"); reason == "" {
+		t.Fatal("request not coalesced")
+	}
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	first.reply <- runner.Result{Stdout: []byte("first")}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	finish(t, e, receive(t, f), "ok")
+	if e.Panels["detail"].Text != "ok" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+}
