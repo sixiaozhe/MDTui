@@ -286,3 +286,494 @@ func TestSnapshotMarkdownRenderedBeforeCommit(t *testing.T) {
 		t.Fatal(e.Panels["md"].Text)
 	}
 }
+
+func TestParentSelectedReference(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Parent: "list", Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}}}}
+	e := New(p, f, time.Now)
+	e.Start()
+	if e.Panels["detail"].Status != "blocked" {
+		t.Fatal("missing parent selection ran")
+	}
+	if reason := e.Request("detail"); reason != "请选择父页对象" {
+		t.Fatalf("reason = %q", reason)
+	}
+	e.ParentSelected = "eth0"
+	e.Request("detail")
+	c := receive(t, f)
+	if len(c.spec.Args) != 2 || c.spec.Args[1] != "eth0" {
+		t.Fatal(c.spec.Args)
+	}
+	finish(t, e, c, "ok")
+	if e.Panels["detail"].Text != "ok" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+}
+
+func TestPanelNamedParentStillResolves(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{
+		{ID: "parent", Mode: "snapshot", Format: "items-json", Autostart: true, Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}},
+	}}
+	e := New(p, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"A"}]}`)
+	e.Panels["parent"].Items = []content.Item{{ID: "A", Label: "A"}}
+	e.Select("parent", "A")
+	c := receive(t, f)
+	if len(c.spec.Args) != 2 || c.spec.Args[1] != "A" {
+		t.Fatal(c.spec.Args)
+	}
+	finish(t, e, c, "ok")
+
+	e.ParentSelected = ""
+	if reason := e.Request("detail"); reason != "" {
+		t.Fatalf("root page reason = %q", reason)
+	}
+	finish(t, e, receive(t, f), "ok")
+
+	reserved := &document.Page{MaxParallel: 1, Parent: "list", Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}}}}
+	e2 := New(reserved, &fake{make(chan call, 1)}, time.Now)
+	if reason := e2.Request("detail"); reason != "请选择父页对象" {
+		t.Fatalf("reserved page reason = %q", reason)
+	}
+}
+
+func TestInvalidateSkipsReservedParentReference(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 1, Parent: "list", Panels: []document.Panel{
+		{ID: "parent", Mode: "snapshot", Format: "items-json", Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}},
+	}}
+	e := New(page, f, time.Now)
+	e.ParentSelected = "eth0"
+	e.Request("detail")
+	finish(t, e, receive(t, f), "reserved")
+	e.Panels["parent"].Items = []content.Item{{ID: "A", Label: "A"}}
+	e.Select("parent", "A")
+	select {
+	case c := <-f.calls:
+		t.Fatalf("unexpected call after local parent selection: %v", c.spec.Args)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if e.Panels["detail"].Text != "reserved" {
+		t.Fatal("reserved parent reference invalidated detail")
+	}
+}
+
+func TestPausePreservesAndResumeRestarts(t *testing.T) {
+	e, f, now := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["log"].Definition.Autostart = true
+	e.Request("log")
+	log := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	log.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	if !e.Paused() {
+		t.Fatal("not paused")
+	}
+	if e.Panels["log"].Status == "error" {
+		t.Fatal("cancel leaked into status")
+	}
+	if e.Panels["detail"].Text != "A" {
+		t.Fatal("snapshot lost")
+	}
+	*now = now.Add(time.Hour)
+	if e.Tick() {
+		t.Fatal("tick while paused")
+	}
+	e.Resume()
+	got := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		c := receive(t, f)
+		got[c.spec.Args[0]] = true
+		text := "A2"
+		if c.spec.Args[0] == "log" {
+			text = ""
+		}
+		finish(t, e, c, text)
+	}
+	if !got["show"] || !got["log"] {
+		t.Fatalf("restarted = %v", got)
+	}
+	if e.Panels["detail"].Text != "A2" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+	if e.Paused() {
+		t.Fatal("still paused")
+	}
+}
+
+func TestResumePreservesStreamViewport(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["log"].Definition.Autostart = true
+	e.Request("log")
+	stream := receive(t, f)
+	p := e.Panels["log"]
+	p.Scroll = 5
+	p.Follow = false
+	p.Dropped = 10
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	stream.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	if !e.Paused() {
+		t.Fatal("not paused")
+	}
+	e.Resume()
+	gotLog := false
+	var logCall call
+	for i := 0; i < 2; i++ {
+		c := receive(t, f)
+		if c.spec.Args[0] == "log" {
+			gotLog = true
+			logCall = c
+			continue
+		}
+		finish(t, e, c, "")
+	}
+	if !gotLog {
+		t.Fatal("stream not restarted")
+	}
+	p.active.buffer.Write([]byte("line\n"))
+	e.Tick()
+	if p.Scroll != 5 || p.Follow {
+		t.Fatalf("viewport reset: scroll=%d follow=%v", p.Scroll, p.Follow)
+	}
+	finish(t, e, logCall, "")
+}
+
+func TestPauseDoesNotRerunOneShot(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Run("detail")
+	c := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	c.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("one-shot reran after resume")
+	}
+}
+
+func TestPauseDoesNotRestartOneShotRefresh(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Run("detail")
+	c := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	c.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("one-shot with refresh reran after resume")
+	}
+	if s := e.Panels["detail"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
+
+func TestPauseSettlesQueuedRefresh(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "q", Mode: "snapshot", Refresh: time.Second, Autostart: true, Exec: []document.Arg{{Literal: "echo"}}}}}
+	e := New(p, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), "old")
+	q := e.Panels["q"]
+	q.Status = "queued"
+	q.queued = true
+	e.queue = append(e.queue, "q")
+	e.Pause()
+	if q.Status != "ready" {
+		t.Fatalf("status = %q", q.Status)
+	}
+	e.Resume()
+	finish(t, e, receive(t, f), "new")
+	if q.Text != "new" {
+		t.Fatal(q.Text)
+	}
+}
+
+func TestPauseResumesActiveSnapshot(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	p := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "snap", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "snap"}}}}}
+	e := New(p, f, time.Now)
+	e.Start()
+	c := receive(t, f)
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	c.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	again := receive(t, f)
+	if again.spec.Args[0] != "snap" {
+		t.Fatal(again.spec.Args)
+	}
+}
+
+func TestPauseCommitsCompletedEvent(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	c := receive(t, f)
+	c.reply <- runner.Result{Stdout: []byte("done")}
+	deadline := time.Now().Add(time.Second)
+	for len(e.Events) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("event not delivered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	e.Pause()
+	if e.Panels["detail"].Text != "done" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+	if e.Panels["detail"].Status != "ready" {
+		t.Fatal(e.Panels["detail"].Status)
+	}
+}
+
+func TestPauseDoesNotRestartCancelledStream(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Panels["log"].Definition.Autostart = true
+	e.Run("log")
+	stream := receive(t, f)
+	e.Cancel("log")
+	finish(t, e, stream, "")
+	e.Pause()
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("cancelled stream restarted")
+	}
+}
+
+func TestPauseDoesNotRestartNaturallyExitedStream(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Request("log")
+	stream := receive(t, f)
+	stream.reply <- runner.Result{Stdout: []byte("done")}
+	deadline := time.Now().Add(time.Second)
+	for len(e.Events) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("event not delivered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	e.Pause()
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("naturally exited stream restarted")
+	}
+	if s := e.Panels["log"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
+
+func TestPauseDoesNotRestartCancelBeforeDrain(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["detail"].Definition.Refresh = 0
+	e.Request("log")
+	stream := receive(t, f)
+	e.Cancel("log")
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	stream.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	if len(f.calls) != 0 {
+		t.Fatal("cancelled stream restarted")
+	}
+	if s := e.Panels["log"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
+
+func TestPauseResumesPendingRegularAfterOneShot(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}}}}}
+	e := New(page, f, time.Now)
+	e.Start()
+	e.Run("detail")
+	first := receive(t, f)
+	if reason := e.Request("detail"); reason == "" {
+		t.Fatal("request not coalesced")
+	}
+	p := e.Panels["detail"]
+	if !p.pending || p.pendingRun {
+		t.Fatalf("pending = %v pendingRun = %v", p.pending, p.pendingRun)
+	}
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	first.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	finish(t, e, receive(t, f), "ok")
+	if p.Text != "ok" {
+		t.Fatal(p.Text)
+	}
+}
+
+func TestPauseResumesPendingRegularAfterOneShotSuccess(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 1, Panels: []document.Panel{{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}}}}}
+	e := New(page, f, time.Now)
+	e.Start()
+	e.Run("detail")
+	first := receive(t, f)
+	if reason := e.Request("detail"); reason == "" {
+		t.Fatal("request not coalesced")
+	}
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	first.reply <- runner.Result{Stdout: []byte("first")}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	e.Resume()
+	finish(t, e, receive(t, f), "ok")
+	if e.Panels["detail"].Text != "ok" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+}
+
+func TestPauseKeepsStaleGenerationWork(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	old := receive(t, f)
+	e.Select("list", "B")
+	old.reply <- runner.Result{Stdout: []byte("old")}
+	e.Pause()
+	e.Resume()
+	next := receive(t, f)
+	if len(next.spec.Args) != 2 || next.spec.Args[0] != "show" || next.spec.Args[1] != "B" {
+		t.Fatalf("args = %v", next.spec.Args)
+	}
+	finish(t, e, next, "new")
+	if e.Panels["detail"].Text != "new" {
+		t.Fatal(e.Panels["detail"].Text)
+	}
+}
+
+func TestPauseDoesNotRestartUserCancelBeforeDrainSuccess(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 2, Panels: []document.Panel{
+		{ID: "list", Mode: "snapshot", Format: "items-json", Autostart: true, Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "list.selected.id"}}},
+	}}
+	e := New(page, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"one"},{"id":"B","label":"two"}]}`)
+	e.Select("list", "A")
+	c := receive(t, f)
+	e.Cancel("detail")
+	c.reply <- runner.Result{Stdout: []byte("late")}
+	e.Pause()
+	e.Resume()
+	select {
+	case call := <-f.calls:
+		t.Fatalf("unexpected restart: %v", call.spec.Args)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if s := e.Panels["detail"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
+
+func TestPauseDoesNotRestartInvalidatedManualPanel(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 2, Panels: []document.Panel{
+		{ID: "list", Mode: "snapshot", Format: "items-json", Autostart: true, Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}, {Ref: "list.selected.id"}}},
+	}}
+	e := New(page, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"one"},{"id":"B","label":"two"}]}`)
+	e.Select("list", "A")
+	e.Request("detail")
+	c := receive(t, f)
+	e.Select("list", "B")
+	c.reply <- runner.Result{Stdout: []byte("late")}
+	e.Pause()
+	e.Resume()
+	select {
+	case call := <-f.calls:
+		t.Fatalf("unexpected restart: %v", call.spec.Args)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if s := e.Panels["detail"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}

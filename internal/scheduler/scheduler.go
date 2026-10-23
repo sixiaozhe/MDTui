@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ type Panel struct {
 	Duration                                        time.Duration
 	pending, queued                                 bool
 	queuedRun, pendingRun                           bool
+	pausedWork, pausedOnce                          bool
+	resumeStream                                    bool
 	active                                          *job
 }
 type job struct {
@@ -43,17 +46,19 @@ type Event struct {
 	Text                string
 }
 type Engine struct {
-	Page     *document.Page
-	Panels   map[string]*Panel
-	Inputs   map[string]string
-	Events   chan Event
-	Now      func() time.Time
-	Runner   runner.Executor
-	Log      func(string, ...any)
-	queue    []string
-	sequence uint64
-	running  int
-	closing  bool
+	Page           *document.Page
+	Panels         map[string]*Panel
+	Inputs         map[string]string
+	ParentSelected string
+	Events         chan Event
+	Now            func() time.Time
+	Runner         runner.Executor
+	Log            func(string, ...any)
+	queue          []string
+	sequence       uint64
+	running        int
+	closing        bool
+	paused         bool
 }
 
 func New(p *document.Page, r runner.Executor, now func() time.Time) *Engine {
@@ -87,6 +92,13 @@ func (e *Engine) Args(id string) ([]string, string) {
 			continue
 		}
 		parts := strings.Split(a.Ref, ".")
+		if e.Page.Parent != "" && len(parts) == 3 && parts[0] == "parent" && parts[1] == "selected" && parts[2] == "id" {
+			if e.ParentSelected == "" {
+				return nil, "请选择父页对象"
+			}
+			result = append(result, e.ParentSelected)
+			continue
+		}
 		if len(parts) == 2 {
 			value := e.Inputs[parts[0]]
 			for _, input := range e.Page.Inputs {
@@ -118,6 +130,9 @@ func (e *Engine) request(id string, once bool) string {
 	if e.closing {
 		return "正在退出"
 	}
+	if e.paused {
+		return "页面已暂停"
+	}
 	if _, reason := e.Args(id); reason != "" {
 		p.Status = "blocked"
 		p.Reason = reason
@@ -144,7 +159,7 @@ func (e *Engine) request(id string, once bool) string {
 	return ""
 }
 func (e *Engine) enqueue(p *Panel) {
-	if e.closing || p.queued {
+	if e.closing || e.paused || p.queued {
 		return
 	}
 	p.queued = true
@@ -154,7 +169,7 @@ func (e *Engine) enqueue(p *Panel) {
 	e.queue = append(e.queue, p.Definition.ID)
 }
 func (e *Engine) dispatch() {
-	if e.closing {
+	if e.closing || e.paused {
 		return
 	}
 	for index := 0; index < len(e.queue) && e.running < e.Page.MaxParallel; {
@@ -194,17 +209,21 @@ func (e *Engine) dispatch() {
 		ctx, cancel := context.WithCancel(context.Background())
 		j := &job{request: e.sequence, generation: p.Generation, cancel: cancel, buffer: &content.Buffer{}, once: p.queuedRun}
 		p.queuedRun = false
+		p.pausedOnce = false
 		p.active = j
 		p.Request = j.request
 		p.Status = "running"
 		p.Reason = ""
 		p.LastProgram = args[0]
 		if p.Definition.Mode == "stream" {
-			p.Text = ""
-			p.Scroll = 0
-			p.Follow = true
+			if !p.resumeStream {
+				p.Text = ""
+				p.Scroll = 0
+				p.Follow = true
+			}
 			p.Dropped = 0
 			p.Truncated = 0
+			p.resumeStream = false
 		}
 		e.running++
 		spec := runner.Spec{Args: args, Dir: e.Page.Dir, Timeout: p.Definition.Timeout, Stream: p.Definition.Mode == "stream"}
@@ -311,6 +330,9 @@ func (e *Engine) readStream(p *Panel) bool {
 	return changed
 }
 func (e *Engine) Tick() bool {
+	if e.paused {
+		return false
+	}
 	changed := false
 	for _, d := range e.Page.Panels {
 		p := e.Panels[d.ID]
@@ -361,6 +383,9 @@ func (e *Engine) invalidate(source string) {
 				continue
 			}
 			for _, a := range d.Exec {
+				if e.Page.Parent != "" && a.Ref == "parent.selected.id" {
+					continue
+				}
 				if strings.HasPrefix(a.Ref, src+".") {
 					affected[d.ID] = true
 					visit(d.ID)
@@ -423,6 +448,7 @@ func (e *Engine) Cancel(id string) {
 	p.pending = false
 	p.queuedRun, p.pendingRun = false, false
 	p.queued = false
+	p.resumeStream = false
 	p.Due = time.Time{}
 	p.Status = "cancelled"
 	p.Reason = "用户已取消"
@@ -470,6 +496,101 @@ func (e *Engine) Preview(a document.Action) string {
 	}
 	return strings.Join(lines, "\n")
 }
+func (e *Engine) Paused() bool { return e.paused }
+
+// Pause 取消在途任务并排空事件，保留已有结果与选择。
+func (e *Engine) Pause() {
+	if e.paused {
+		return
+	}
+	e.paused = true
+	e.queue = nil
+	for _, p := range e.Panels {
+		activeCurrent := p.active != nil && p.active.generation == p.Generation
+		regularWork := (activeCurrent && !p.active.once) || (p.queued && !p.queuedRun) || (p.pending && !p.pendingRun)
+		oneWork := (activeCurrent && p.active.once) || p.queuedRun || p.pendingRun
+		p.pausedWork = regularWork
+		p.pausedOnce = !regularWork && oneWork
+		p.Due = time.Time{}
+		p.pending = false
+		p.queuedRun, p.pendingRun = false, false
+		p.queued = false
+		if p.Status == "queued" {
+			e.settleStatus(p)
+		}
+		if p.active != nil {
+			p.active.cancel()
+		}
+	}
+	for e.running > 0 {
+		e.consumePaused(<-e.Events)
+	}
+}
+
+func (e *Engine) settleStatus(p *Panel) {
+	if p.Status == "running" || p.Status == "queued" {
+		if len(p.Items) > 0 || p.Text != "" {
+			p.Status = "ready"
+		} else {
+			p.Status = "idle"
+		}
+	}
+}
+
+func (e *Engine) consumePaused(ev Event) {
+	p := e.Panels[ev.ID]
+	if p == nil || p.active == nil || p.active.request != ev.Request {
+		return
+	}
+	once := p.active.once
+	current := ev.Generation == p.Generation
+	if ev.Result.Err == nil || !errors.Is(ev.Result.Err, context.Canceled) {
+		if current && !once {
+			p.pausedWork = false
+		}
+		e.Consume(ev)
+		return
+	}
+	if p.Status == "cancelled" {
+		p.pausedWork = false
+	}
+	p.active.cancel()
+	p.active = nil
+	e.running--
+	e.settleStatus(p)
+}
+
+// Resume 重启暂停时在途的常规任务，以及 ready/error 的周期刷新面板。
+func (e *Engine) Resume() {
+	if !e.paused {
+		return
+	}
+	e.paused = false
+	for _, d := range e.Page.Panels {
+		p := e.Panels[d.ID]
+		if p.active != nil || p.queued {
+			continue
+		}
+		def := p.Definition
+		restart := p.pausedWork
+		if def.Refresh > 0 && (p.Status == "ready" || p.Status == "error") {
+			restart = true
+		}
+		if p.pausedOnce {
+			restart = false
+		}
+		p.pausedWork = false
+		p.pausedOnce = false
+		if restart {
+			if def.Mode == "stream" {
+				p.resumeStream = true
+			}
+			e.enqueue(p)
+		}
+	}
+	e.dispatch()
+}
+
 func (e *Engine) Close() {
 	e.closing = true
 	e.queue = nil

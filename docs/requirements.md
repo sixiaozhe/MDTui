@@ -158,8 +158,9 @@ max_parallel: 2
 - `version`：必填，只接受整数 1。
 - `id`：必填；全局标识使用 `[A-Za-z][A-Za-z0-9_-]{0,63}`。
 - `title`：可选，默认使用页面 ID。
-- `layout`：`stack` 或 `master-detail`，默认 `stack`。
+- `layout`：`stack`、`master-detail` 或 `workspace`，默认 `stack`。
 - `sidebar`：主从布局必填，必须引用一个 panel ID。
+- `parent`：可选，子页声明父页面中触发跳转的 panel ID；声明后才可使用 `{ref: "parent.selected.id"}`。
 - `max_parallel`：1～8，默认 2，超过范围报错。
 - 页面最多 16 个 panel、16 个 input、32 个 action；文件最大 1 MiB。
 
@@ -184,6 +185,7 @@ timeout: 5s
 | title | 默认 ID |
 | mode | `snapshot` 或 `stream`，默认 snapshot |
 | format | `markdown`、`text`、`items-json`，默认 markdown |
+| open | 可选，仅 `items-json` snapshot 可用；相对当前页面的子页路径 |
 | exec | 非空参数数组；可执行文件只能是字面量字符串 |
 | refresh | 仅 snapshot 可用，完成后等待指定时长再次执行；默认关闭，最小 250ms |
 | timeout | snapshot 默认 5s；stream 默认 0（无限）；0 仅 stream 可用 |
@@ -193,11 +195,14 @@ timeout: 5s
 
 `items-json` 仅支持 snapshot。其他组合超出规范时直接报错。
 
+`open` 让列表选中项进入全屏子页。子页可继续声明 `open`，最多 8 层；`mdtui check` 按绝对路径检测循环、父子声明不一致和深度超限。
+
 ### 5.5 引用与依赖
 
-支持两类引用：
+支持三类引用：
 
 - `<panel-id>.selected.id`：可选列表当前确认对象的稳定 ID。
+- `parent.selected.id`：父页面中触发当前子页的列表当前选中 ID；仅子页声明 `parent` 后可用。
 - `<input-id>.value`：文本输入控件当前提交的值。
 
 引用必须占据整个参数，不支持字符串内插、点路径扩展、算术运算、命令替换或 shell 求值。
@@ -443,6 +448,7 @@ stream 的 Markdown 在未闭合代码块、列表和最后一行处允许暂时
 - 支持窗口 resize，不重新执行命令，不重置用户输入。
 - 中文、宽字符、组合字符的显示宽度按终端单元格计算，不能按字节数或简单字符串长度布局。
 - 颜色不能作为状态的唯一标识；提供无颜色模式。
+- 子页全屏显示；进入时暂停父页调度并保留父页选择、滚动和焦点，返回时恢复。子页内 `Esc` 或 `q` 返回，根页 `q` 退出。
 
 ### 10.3 终端生命周期
 

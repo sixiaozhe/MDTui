@@ -1,14 +1,19 @@
 package tui
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/gdamore/tcell/v2"
 	"mdtui/internal/content"
 	"mdtui/internal/document"
 	"mdtui/internal/runner"
 	"mdtui/internal/scheduler"
-	"strings"
-	"testing"
-	"time"
 )
 
 func testUI(t *testing.T) *UI {
@@ -285,5 +290,294 @@ func TestDrawsWorkbenchChromeAndRichMarkdown(t *testing.T) {
 	}
 	if strings.Contains(text, "**设备在线**") {
 		t.Fatal("markdown markers were rendered literally")
+	}
+}
+
+func navUI(t *testing.T, child string) *UI {
+	t.Helper()
+	return navUIAt(t, t.TempDir(), child)
+}
+
+func navUIAt(t *testing.T, dir, child string) *UI {
+	t.Helper()
+	rootPath := filepath.Join(dir, "root.md")
+	root := ":::mdtui page\nversion: 1\nid: root\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./child.md\n:::\n"
+	if err := os.WriteFile(rootPath, []byte(root), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if child != "" {
+		if err := os.WriteFile(filepath.Join(dir, "child.md"), []byte(child), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := document.Load(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := tcell.NewSimulationScreen("UTF-8")
+	s.Init()
+	s.SetSize(120, 40)
+	t.Cleanup(s.Fini)
+	e := scheduler.New(page, runner.OS{}, time.Now)
+	e.Panels["list"].Items = []content.Item{{ID: "A", Label: "one"}, {ID: "B", Label: "two"}}
+	return New(s, e, false)
+}
+
+const childPage = ":::mdtui page\nversion: 1\nid: child\nparent: list\n:::\n:::mdtui panel\nid: detail\nautostart: false\nexec: [echo]\n:::\n"
+
+func TestPageNavigationPushPop(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "child" {
+		t.Fatal("child not pushed")
+	}
+	if u.Engine.ParentSelected != "A" {
+		t.Fatalf("parent selected = %q", u.Engine.ParentSelected)
+	}
+	if !u.sessions[0].Engine.Paused() {
+		t.Fatal("parent not paused")
+	}
+	if u.sessions[0].Engine.Panels["list"].Selected != "A" {
+		t.Fatal("parent selection lost")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	if len(u.sessions) != 0 || u.Engine.Page.ID != "root" {
+		t.Fatal("child not popped")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("parent not resumed")
+	}
+	if u.Engine.Panels["list"].Selected != "A" {
+		t.Fatal("selection lost after return")
+	}
+	u.pushChild("list")
+	if len(u.sessions) != 0 {
+		t.Fatal("same selection reopened child")
+	}
+	u.Engine.Select("list", "B")
+	u.pushChild("list")
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "B" {
+		t.Fatal("new selection did not open child")
+	}
+}
+
+func TestPageNavigationQuitKeys(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if u.Key(tcell.NewEventKey(tcell.KeyRune, 'q', 0)) {
+		t.Fatal("q exited from child")
+	}
+	if len(u.sessions) != 0 {
+		t.Fatal("q did not return")
+	}
+	if !u.Key(tcell.NewEventKey(tcell.KeyRune, 'q', 0)) {
+		t.Fatal("q did not exit root")
+	}
+}
+
+func TestPageNavigationDepthLimit(t *testing.T) {
+	u := navUI(t, childPage)
+	u.sessions = make([]session, document.MaxDepth-1)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if len(u.sessions) != document.MaxDepth-1 {
+		t.Fatal("depth limit not enforced")
+	}
+	if !strings.Contains(u.notice, "嵌套") {
+		t.Fatalf("notice = %q", u.notice)
+	}
+}
+
+func writePage(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPageNavigationNestedPushPop(t *testing.T) {
+	dir := t.TempDir()
+	writePage(t, dir, "root.md", ":::mdtui page\nversion: 1\nid: root\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./child.md\n:::\n")
+	writePage(t, dir, "child.md", ":::mdtui page\nversion: 1\nid: child\nparent: list\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./grand.md\n:::\n")
+	writePage(t, dir, "grand.md", ":::mdtui page\nversion: 1\nid: grand\nparent: list\n:::\n:::mdtui panel\nid: detail\nautostart: false\nexec: [echo]\n:::\n")
+	page, err := document.Load(filepath.Join(dir, "root.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := tcell.NewSimulationScreen("UTF-8")
+	s.Init()
+	s.SetSize(120, 40)
+	t.Cleanup(s.Fini)
+	e := scheduler.New(page, runner.OS{}, time.Now)
+	e.Panels["list"].Items = []content.Item{{ID: "A", Label: "one"}, {ID: "B", Label: "two"}}
+	u := New(s, e, false)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	u.Engine.Panels["list"].Items = []content.Item{{ID: "A", Label: "one"}, {ID: "B", Label: "two"}}
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if len(u.sessions) != 2 || u.Engine.Page.ID != "grand" {
+		t.Fatal("grandchild not pushed")
+	}
+	if u.sessions[0].Engine.Page.ID != "root" || u.sessions[1].Engine.Page.ID != "child" {
+		t.Fatal("session stack order wrong")
+	}
+	if !u.sessions[0].Engine.Paused() || !u.sessions[1].Engine.Paused() {
+		t.Fatal("parents not paused")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	if u.Engine.Page.ID != "root" || len(u.sessions) != 0 {
+		t.Fatal("not back at root")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("root still paused")
+	}
+	if u.Engine.Panels["list"].Selected != "A" {
+		t.Fatal("root selection lost")
+	}
+}
+
+func TestPageNavigationFailedLoadLeavesParentRunning(t *testing.T) {
+	u := navUI(t, "")
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	if len(u.sessions) != 0 {
+		t.Fatal("session pushed for failed load")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("parent paused after failed load")
+	}
+	if u.notice == "" || !strings.Contains(u.notice, "child.md") {
+		t.Fatalf("notice = %q", u.notice)
+	}
+}
+
+type holdRunner struct {
+	started   chan struct{}
+	stopped   chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
+}
+
+func (r *holdRunner) Run(ctx context.Context, _ runner.Spec, _ *content.Buffer) runner.Result {
+	r.startOnce.Do(func() { close(r.started) })
+	<-ctx.Done()
+	r.stopOnce.Do(func() { close(r.stopped) })
+	return runner.Result{Err: ctx.Err()}
+}
+
+func TestSelectionOpensChildPage(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "child" {
+		t.Fatal("selection did not open child")
+	}
+	if u.Engine.ParentSelected != "A" {
+		t.Fatalf("parent selected = %q", u.Engine.ParentSelected)
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("same selection reopened child")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyDown, 0, 0))
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "B" {
+		t.Fatal("changed selection did not open child")
+	}
+}
+
+func TestSelectionCanReenterAfterSelectionCleared(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "A" {
+		t.Fatal("first selection did not open child")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	u.Engine.Panels["list"].Selected = ""
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "A" {
+		t.Fatal("selection did not reopen child after reset")
+	}
+}
+
+func TestSelectionRetriesFailedChildLoad(t *testing.T) {
+	dir := t.TempDir()
+	u := navUIAt(t, dir, "")
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("pushed on load failure")
+	}
+	if u.notice == "" {
+		t.Fatal("missing failure notice")
+	}
+	writePage(t, dir, "child.md", childPage)
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "child" {
+		t.Fatal("same selection did not retry child load")
+	}
+}
+
+func TestChildLoadFailureShowsNotice(t *testing.T) {
+	u := navUI(t, "")
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("pushed on load failure")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("parent paused on load failure")
+	}
+	if !strings.Contains(u.notice, "child.md") {
+		t.Fatalf("notice = %q", u.notice)
+	}
+}
+
+func TestChildParentMismatchShowsNotice(t *testing.T) {
+	u := navUI(t, strings.Replace(childPage, "parent: list", "parent: other", 1))
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("pushed mismatched child")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("parent paused on parent mismatch")
+	}
+	if !strings.Contains(u.notice, "不一致") {
+		t.Fatalf("notice = %q", u.notice)
+	}
+}
+
+func TestCloseStopsChildEngine(t *testing.T) {
+	dir := t.TempDir()
+	writePage(t, dir, "root.md", ":::mdtui page\nversion: 1\nid: root\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./child.md\n:::\n")
+	writePage(t, dir, "child.md", ":::mdtui page\nversion: 1\nid: child\nparent: list\n:::\n:::mdtui panel\nid: job\nmode: stream\nautostart: true\nexec: [job]\n:::\n")
+	page, err := document.Load(filepath.Join(dir, "root.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := tcell.NewSimulationScreen("UTF-8")
+	s.Init()
+	s.SetSize(120, 40)
+	t.Cleanup(s.Fini)
+	r := &holdRunner{started: make(chan struct{}), stopped: make(chan struct{})}
+	e := scheduler.New(page, r, time.Now)
+	e.Panels["list"].Items = []content.Item{{ID: "A", Label: "one"}}
+	u := New(s, e, false)
+	u.Engine.Select("list", "A")
+	u.pushChild("list")
+	select {
+	case <-r.started:
+	case <-time.After(time.Second):
+		t.Fatal("child job did not start")
+	}
+	u.Close()
+	select {
+	case <-r.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("child job did not stop")
 	}
 }

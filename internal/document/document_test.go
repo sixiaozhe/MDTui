@@ -28,6 +28,15 @@ func TestCompilerContracts(t *testing.T) {
 		{"nested", header + ":::mdtui panel\n:::mdtui input\n:::", false},
 		{"stream-items", header + ":::mdtui panel\nid: x\nmode: stream\nformat: items-json\nexec: [echo]\n:::", false},
 		{"refresh-zero", header + ":::mdtui panel\nid: x\nrefresh: 0\nexec: [echo]\n:::", false},
+		{"open-valid", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: ./child.md\n:::", true},
+		{"open-wrong-format", header + ":::mdtui panel\nid: x\nexec: [echo]\nopen: ./child.md\n:::", false},
+		{"open-absolute", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: /tmp/child.md\n:::", false},
+		{"parent-ref", strings.Replace(header, "id: test", "id: test\nparent: list", 1) + ":::mdtui panel\nid: x\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", true},
+		{"panel-named-parent", header + ":::mdtui panel\nid: parent\nformat: items-json\nexec: [echo]\n:::\n:::mdtui panel\nid: detail\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", true},
+		{"parent-ref-without-parent", header + ":::mdtui panel\nid: x\nexec: [echo, {ref: 'parent.selected.id'}]\n:::", false},
+		{"parent-invalid", strings.Replace(header, "id: test", "id: test\nparent: 1bad", 1), false},
+		{"open-empty", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"\"\n:::", false},
+		{"open-blank", header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"   \"\n:::", false},
 		{"reserved-key", header + ":::mdtui panel\nid: x\nexec: [echo]\n:::\n:::mdtui action\nid: a\nrun: x\nkey: q\n:::", false},
 	}
 	for _, tc := range cases {
@@ -42,6 +51,17 @@ func TestCompilerContracts(t *testing.T) {
 		})
 	}
 }
+func TestOpenPathIsTrimmed(t *testing.T) {
+	body := header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"  ./child.md  \"\n:::"
+	p, err := Parse("fixture.md", []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Panels) != 1 || p.Panels[0].Open != "./child.md" {
+		t.Fatalf("open = %q", p.Panels[0].Open)
+	}
+}
+
 func TestLimits(t *testing.T) {
 	if _, e := Parse("large.md", make([]byte, (1<<20)+1)); e == nil {
 		t.Fatal("accepted oversized file")
