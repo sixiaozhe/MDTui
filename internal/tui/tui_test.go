@@ -488,11 +488,28 @@ func TestSelectionOpensChildPage(t *testing.T) {
 	}
 }
 
+func TestSelectionCanReenterAfterSelectionCleared(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "A" {
+		t.Fatal("first selection did not open child")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	u.Engine.Panels["list"].Selected = ""
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "A" {
+		t.Fatal("selection did not reopen child after reset")
+	}
+}
+
 func TestChildLoadFailureShowsNotice(t *testing.T) {
 	u := navUI(t, "")
 	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
 	if len(u.sessions) != 0 {
 		t.Fatal("pushed on load failure")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("parent paused on load failure")
 	}
 	if !strings.Contains(u.notice, "child.md") {
 		t.Fatalf("notice = %q", u.notice)
@@ -504,6 +521,9 @@ func TestChildParentMismatchShowsNotice(t *testing.T) {
 	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
 	if len(u.sessions) != 0 {
 		t.Fatal("pushed mismatched child")
+	}
+	if u.Engine.Paused() {
+		t.Fatal("parent paused on parent mismatch")
 	}
 	if !strings.Contains(u.notice, "不一致") {
 		t.Fatalf("notice = %q", u.notice)

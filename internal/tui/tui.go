@@ -471,8 +471,11 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 			before := p.Selected
 			u.Engine.Select(p.Definition.ID, p.Items[p.Cursor].ID)
 			u.selectWorkspaceView(p.Definition.ID)
-			if p.Selected != before && p.Definition.Open != "" {
-				u.pushChild(p.Definition.ID)
+			if p.Selected != before {
+				delete(u.opened, p.Definition.ID)
+				if p.Definition.Open != "" {
+					u.pushChild(p.Definition.ID)
+				}
 			}
 		}
 	case tcell.KeyCtrlC:
