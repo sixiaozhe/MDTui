@@ -656,3 +656,54 @@ func TestPauseKeepsStaleGenerationWork(t *testing.T) {
 		t.Fatal(e.Panels["detail"].Text)
 	}
 }
+
+func TestPauseDoesNotRestartUserCancelBeforeDrainSuccess(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 2, Panels: []document.Panel{
+		{ID: "list", Mode: "snapshot", Format: "items-json", Autostart: true, Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Autostart: true, Exec: []document.Arg{{Literal: "show"}, {Ref: "list.selected.id"}}},
+	}}
+	e := New(page, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"one"},{"id":"B","label":"two"}]}`)
+	e.Select("list", "A")
+	c := receive(t, f)
+	e.Cancel("detail")
+	c.reply <- runner.Result{Stdout: []byte("late")}
+	e.Pause()
+	e.Resume()
+	select {
+	case call := <-f.calls:
+		t.Fatalf("unexpected restart: %v", call.spec.Args)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if s := e.Panels["detail"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}
+
+func TestPauseDoesNotRestartInvalidatedManualPanel(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 2, Panels: []document.Panel{
+		{ID: "list", Mode: "snapshot", Format: "items-json", Autostart: true, Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}, {Ref: "list.selected.id"}}},
+	}}
+	e := New(page, f, time.Now)
+	e.Start()
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"A","label":"one"},{"id":"B","label":"two"}]}`)
+	e.Select("list", "A")
+	e.Request("detail")
+	c := receive(t, f)
+	e.Select("list", "B")
+	c.reply <- runner.Result{Stdout: []byte("late")}
+	e.Pause()
+	e.Resume()
+	select {
+	case call := <-f.calls:
+		t.Fatalf("unexpected restart: %v", call.spec.Args)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if s := e.Panels["detail"].Status; s == "running" || s == "queued" {
+		t.Fatalf("status = %q", s)
+	}
+}

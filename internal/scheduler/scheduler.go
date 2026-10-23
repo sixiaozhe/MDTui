@@ -498,8 +498,9 @@ func (e *Engine) Pause() {
 	e.paused = true
 	e.queue = nil
 	for _, p := range e.Panels {
-		regularWork := (p.active != nil && !p.active.once) || (p.queued && !p.queuedRun) || (p.pending && !p.pendingRun)
-		oneWork := (p.active != nil && p.active.once) || p.queuedRun || p.pendingRun
+		activeCurrent := p.active != nil && p.active.generation == p.Generation
+		regularWork := (activeCurrent && !p.active.once) || (p.queued && !p.queuedRun) || (p.pending && !p.pendingRun)
+		oneWork := (activeCurrent && p.active.once) || p.queuedRun || p.pendingRun
 		p.pausedWork = regularWork
 		p.pausedOnce = !regularWork && oneWork
 		p.Due = time.Time{}
