@@ -468,8 +468,12 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 			u.draftCursor = utf8.RuneCountInString(u.draft)
 			u.inputX = 0
 		} else if p := u.panel(); p != nil && p.Definition.Format == "items-json" && len(p.Items) > 0 {
+			before := p.Selected
 			u.Engine.Select(p.Definition.ID, p.Items[p.Cursor].ID)
 			u.selectWorkspaceView(p.Definition.ID)
+			if p.Selected != before && p.Definition.Open != "" {
+				u.pushChild(p.Definition.ID)
+			}
 		}
 	case tcell.KeyCtrlC:
 		if p := u.panel(); p != nil && (p.Status == "running" || p.Status == "queued") {

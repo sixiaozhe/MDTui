@@ -467,6 +467,49 @@ func (r *holdRunner) Run(ctx context.Context, _ runner.Spec, _ *content.Buffer) 
 	return runner.Result{Err: ctx.Err()}
 }
 
+func TestSelectionOpensChildPage(t *testing.T) {
+	u := navUI(t, childPage)
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "child" {
+		t.Fatal("selection did not open child")
+	}
+	if u.Engine.ParentSelected != "A" {
+		t.Fatalf("parent selected = %q", u.Engine.ParentSelected)
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("same selection reopened child")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyDown, 0, 0))
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "B" {
+		t.Fatal("changed selection did not open child")
+	}
+}
+
+func TestChildLoadFailureShowsNotice(t *testing.T) {
+	u := navUI(t, "")
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("pushed on load failure")
+	}
+	if !strings.Contains(u.notice, "child.md") {
+		t.Fatalf("notice = %q", u.notice)
+	}
+}
+
+func TestChildParentMismatchShowsNotice(t *testing.T) {
+	u := navUI(t, strings.Replace(childPage, "parent: list", "parent: other", 1))
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("pushed mismatched child")
+	}
+	if !strings.Contains(u.notice, "不一致") {
+		t.Fatalf("notice = %q", u.notice)
+	}
+}
+
 func TestCloseStopsChildEngine(t *testing.T) {
 	dir := t.TempDir()
 	writePage(t, dir, "root.md", ":::mdtui page\nversion: 1\nid: root\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./child.md\n:::\n")
