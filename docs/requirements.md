@@ -199,7 +199,7 @@ timeout: 5s
 
 ### 5.5 引用与依赖
 
-支持两类引用：
+支持三类引用：
 
 - `<panel-id>.selected.id`：可选列表当前确认对象的稳定 ID。
 - `parent.selected.id`：父页面中触发当前子页的列表当前选中 ID；仅子页声明 `parent` 后可用。
