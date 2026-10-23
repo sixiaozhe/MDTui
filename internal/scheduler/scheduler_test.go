@@ -340,6 +340,28 @@ func TestPanelNamedParentStillResolves(t *testing.T) {
 	}
 }
 
+func TestInvalidateSkipsReservedParentReference(t *testing.T) {
+	f := &fake{make(chan call, 4)}
+	page := &document.Page{MaxParallel: 1, Parent: "list", Panels: []document.Panel{
+		{ID: "parent", Mode: "snapshot", Format: "items-json", Exec: []document.Arg{{Literal: "list"}}},
+		{ID: "detail", Mode: "snapshot", Exec: []document.Arg{{Literal: "show"}, {Ref: "parent.selected.id"}}},
+	}}
+	e := New(page, f, time.Now)
+	e.ParentSelected = "eth0"
+	e.Request("detail")
+	finish(t, e, receive(t, f), "reserved")
+	e.Panels["parent"].Items = []content.Item{{ID: "A", Label: "A"}}
+	e.Select("parent", "A")
+	select {
+	case c := <-f.calls:
+		t.Fatalf("unexpected call after local parent selection: %v", c.spec.Args)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if e.Panels["detail"].Text != "reserved" {
+		t.Fatal("reserved parent reference invalidated detail")
+	}
+}
+
 func TestPausePreservesAndResumeRestarts(t *testing.T) {
 	e, f, now := loaded(t)
 	e.Select("list", "A")
@@ -390,6 +412,47 @@ func TestPausePreservesAndResumeRestarts(t *testing.T) {
 	}
 	if e.Paused() {
 		t.Fatal("still paused")
+	}
+}
+
+func TestResumePreservesStreamViewport(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Select("list", "A")
+	finish(t, e, receive(t, f), "A")
+	e.Panels["log"].Definition.Autostart = true
+	e.Request("log")
+	stream := receive(t, f)
+	p := e.Panels["log"]
+	p.Scroll = 5
+	p.Follow = false
+	done := make(chan struct{})
+	go func() {
+		e.Pause()
+		close(done)
+	}()
+	stream.reply <- runner.Result{Err: context.Canceled}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pause blocked")
+	}
+	if !e.Paused() {
+		t.Fatal("not paused")
+	}
+	e.Resume()
+	gotLog := false
+	for i := 0; i < 2; i++ {
+		c := receive(t, f)
+		if c.spec.Args[0] == "log" {
+			gotLog = true
+		}
+		finish(t, e, c, "")
+	}
+	if !gotLog {
+		t.Fatal("stream not restarted")
+	}
+	if p.Scroll != 5 || p.Follow {
+		t.Fatalf("viewport reset: scroll=%d follow=%v", p.Scroll, p.Follow)
 	}
 }
 

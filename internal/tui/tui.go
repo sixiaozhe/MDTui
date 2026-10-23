@@ -473,9 +473,9 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 			u.selectWorkspaceView(p.Definition.ID)
 			if p.Selected != before {
 				delete(u.opened, p.Definition.ID)
-				if p.Definition.Open != "" {
-					u.pushChild(p.Definition.ID)
-				}
+			}
+			if p.Definition.Open != "" && p.Selected != "" {
+				u.pushChild(p.Definition.ID)
 			}
 		}
 	case tcell.KeyCtrlC:
@@ -1183,7 +1183,7 @@ func (u *UI) drawModal(w, h int) {
 	switch u.modal {
 	case "help":
 		title = "? 快捷键帮助"
-		lines = []string{"Tab / Shift+Tab   切换说明、输入和面板", "[ / ]             切换工作区详情视图", "↑↓ / PgUp PgDn    移动、翻页（列表需 Enter 确认）", "←→ / Home End     横向查看代码和宽表、跳到首尾", "/ / n / N         搜索当前区域、下一个、上一个匹配", "输入：←→ Home End 移动；Backspace / Del 删除", "Enter / Esc       编辑、提交或放弃输入", "F2 / !            动作列表、当前面板错误详情", "Z / Esc          放大当前面板、退出放大", "Space / End       暂停跟随、恢复日志跟随", "Ctrl+C / q        取消当前任务、安全退出", "", "链接地址会显示在链接文字之后。"}
+		lines = []string{"Tab / Shift+Tab   切换说明、输入和面板", "[ / ]             切换工作区详情视图", "↑↓ / PgUp PgDn    移动、翻页（列表需 Enter 确认）", "←→ / Home End     横向查看代码和宽表、跳到首尾", "/ / n / N         搜索当前区域、下一个、上一个匹配", "输入：←→ Home End 移动；Backspace / Del 删除", "Enter / Esc       编辑、提交或放弃输入", "F2 / !            动作列表、当前面板错误详情", "Z / Esc          放大当前面板、退出放大", "Space / End       暂停跟随、恢复日志跟随", "Ctrl+C            取消当前任务；q 在根页退出", "Esc / q          子页返回上一层", "", "链接地址会显示在链接文字之后。"}
 	case "errors":
 		title = "! 错误详情"
 		if p := u.panel(); p != nil {

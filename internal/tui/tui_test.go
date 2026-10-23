@@ -295,7 +295,11 @@ func TestDrawsWorkbenchChromeAndRichMarkdown(t *testing.T) {
 
 func navUI(t *testing.T, child string) *UI {
 	t.Helper()
-	dir := t.TempDir()
+	return navUIAt(t, t.TempDir(), child)
+}
+
+func navUIAt(t *testing.T, dir, child string) *UI {
+	t.Helper()
 	rootPath := filepath.Join(dir, "root.md")
 	root := ":::mdtui page\nversion: 1\nid: root\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./child.md\n:::\n"
 	if err := os.WriteFile(rootPath, []byte(root), 0600); err != nil {
@@ -499,6 +503,23 @@ func TestSelectionCanReenterAfterSelectionCleared(t *testing.T) {
 	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
 	if len(u.sessions) != 1 || u.Engine.ParentSelected != "A" {
 		t.Fatal("selection did not reopen child after reset")
+	}
+}
+
+func TestSelectionRetriesFailedChildLoad(t *testing.T) {
+	dir := t.TempDir()
+	u := navUIAt(t, dir, "")
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 0 {
+		t.Fatal("pushed on load failure")
+	}
+	if u.notice == "" {
+		t.Fatal("missing failure notice")
+	}
+	writePage(t, dir, "child.md", childPage)
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if len(u.sessions) != 1 || u.Engine.Page.ID != "child" {
+		t.Fatal("same selection did not retry child load")
 	}
 }
 

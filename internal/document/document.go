@@ -178,6 +178,7 @@ func Parse(file string, data []byte) (p *Page, err error) {
 		case "panel":
 			c.allowed(b, "id title mode format exec refresh timeout autostart open")
 			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), Open: c.str(b, "open", "", false), Autostart: c.boolean(b, "autostart", true)}
+			v.Open = strings.TrimSpace(v.Open)
 			if v.Mode != "snapshot" && v.Mode != "stream" {
 				c.fail(b.line, "mode", "使用 snapshot 或 stream")
 			}
@@ -187,7 +188,7 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			if v.Mode == "stream" && v.Format == "items-json" {
 				c.fail(b.line, "format", "items-json 只支持 snapshot")
 			}
-			if n, ok := b.fields["open"]; ok && strings.TrimSpace(v.Open) == "" {
+			if n, ok := b.fields["open"]; ok && v.Open == "" {
 				c.fail(b.line+n.Line, "open", "路径不能为空")
 			}
 			if v.Open != "" {

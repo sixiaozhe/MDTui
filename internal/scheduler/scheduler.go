@@ -28,6 +28,7 @@ type Panel struct {
 	pending, queued                                 bool
 	queuedRun, pendingRun                           bool
 	pausedWork, pausedOnce                          bool
+	resumeStream                                    bool
 	active                                          *job
 }
 type job struct {
@@ -215,11 +216,14 @@ func (e *Engine) dispatch() {
 		p.Reason = ""
 		p.LastProgram = args[0]
 		if p.Definition.Mode == "stream" {
-			p.Text = ""
-			p.Scroll = 0
-			p.Follow = true
-			p.Dropped = 0
-			p.Truncated = 0
+			if !p.resumeStream {
+				p.Text = ""
+				p.Scroll = 0
+				p.Follow = true
+				p.Dropped = 0
+				p.Truncated = 0
+			}
+			p.resumeStream = false
 		}
 		e.running++
 		spec := runner.Spec{Args: args, Dir: e.Page.Dir, Timeout: p.Definition.Timeout, Stream: p.Definition.Mode == "stream"}
@@ -379,6 +383,9 @@ func (e *Engine) invalidate(source string) {
 				continue
 			}
 			for _, a := range d.Exec {
+				if e.Page.Parent != "" && a.Ref == "parent.selected.id" {
+					continue
+				}
 				if strings.HasPrefix(a.Ref, src+".") {
 					affected[d.ID] = true
 					visit(d.ID)
@@ -574,6 +581,9 @@ func (e *Engine) Resume() {
 		p.pausedWork = false
 		p.pausedOnce = false
 		if restart {
+			if def.Mode == "stream" {
+				p.resumeStream = true
+			}
 			e.enqueue(p)
 		}
 	}

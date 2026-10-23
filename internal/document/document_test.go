@@ -51,6 +51,17 @@ func TestCompilerContracts(t *testing.T) {
 		})
 	}
 }
+func TestOpenPathIsTrimmed(t *testing.T) {
+	body := header + ":::mdtui panel\nid: list\nformat: items-json\nexec: [echo]\nopen: \"  ./child.md  \"\n:::"
+	p, err := Parse("fixture.md", []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Panels) != 1 || p.Panels[0].Open != "./child.md" {
+		t.Fatalf("open = %q", p.Panels[0].Open)
+	}
+}
+
 func TestLimits(t *testing.T) {
 	if _, e := Parse("large.md", make([]byte, (1<<20)+1)); e == nil {
 		t.Fatal("accepted oversized file")
