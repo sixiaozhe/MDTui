@@ -23,5 +23,9 @@ def check():
         assert p.returncode==0 and b'0 panels' in p.stdout and not marker.exists()
         for args in [['--version'],['--help']]:assert subprocess.run([str(BIN),*args],capture_output=True).returncode==0
         assert subprocess.run([str(BIN),'--unknown'],capture_output=True).returncode==2
+        for args in [['--stream-buffer-kib','63'],['--stream-buffer-kib','2049'],['--stream-buffer-kib','no'],['--stream-interval','99ms'],['--stream-interval','6s'],['--stream-interval','bad'],['--stream-interval']]:
+            assert subprocess.run([str(BIN),*args,str(page)],capture_output=True).returncode==2,args
+        p=subprocess.run([str(BIN),'--low-resource','--stream-buffer-kib','128','--stream-interval','750ms','check',str(page)],capture_output=True)
+        assert p.returncode==0 and not marker.exists(),p.stderr
     return {'check_zero_execution':True,'invalid_page_zero_execution':True,'fenced_example_inert':True,'cli_exit_codes':True}
 if __name__=='__main__':print(json.dumps(check(),indent=2))

@@ -39,6 +39,9 @@ func Markdown(source string) string {
 	src := []byte(Safe(source))
 	root := markdownParser.Parser().Parse(text.NewReader(src))
 	r := markdownRenderer{source: src}
+	// Most output is source text plus short style sequences. Reserving once
+	// avoids repeatedly growing/copying multi-megabyte stream renderings.
+	r.out.Grow(len(src) + len(src)/4 + 32)
 	r.blocks(root, 0)
 	return strings.TrimRight(r.out.String(), "\n") + sgrReset
 }

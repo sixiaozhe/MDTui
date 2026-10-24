@@ -8,7 +8,7 @@ import argparse,os,pty,fcntl,termios,struct,subprocess,select,time,signal,json,t
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 
-def run(seconds,stream,content_format='text'):
+def run(seconds,stream,content_format='text',extra_args=()):
     with tempfile.TemporaryDirectory(prefix='mdtui-perf-') as directory:
         directory=Path(directory)
         script=directory/'source.py'
@@ -24,7 +24,7 @@ def run(seconds,stream,content_format='text'):
         master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',40,120,0,0))
         def setup():
             os.setsid();fcntl.ioctl(0,termios.TIOCSCTTY,0)
-        p=subprocess.Popen([str(ROOT/'bin/mdtui'),str(path)],stdin=slave,stdout=slave,stderr=slave,preexec_fn=setup,env={**os.environ,'TERM':'xterm-256color','LANG':'C.UTF-8'})
+        p=subprocess.Popen([str(ROOT/'bin/mdtui'),*extra_args,str(path)],stdin=slave,stdout=slave,stderr=slave,preexec_fn=setup,env={**os.environ,'TERM':'xterm-256color','LANG':'C.UTF-8'})
         def sample():
             fields=Path(f'/proc/{p.pid}/stat').read_text().split()
             rss=int(Path(f'/proc/{p.pid}/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
@@ -51,10 +51,12 @@ def run(seconds,stream,content_format='text'):
             os.close(master);os.close(slave)
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--seconds',type=int,default=1800);parser.add_argument('--idle-seconds',type=int,default=30);parser.add_argument('--format',choices=['text','markdown'],default='text');parser.add_argument('--output',default='docs/evidence/performance.json');args=parser.parse_args()
-    report={'environment':os.uname()._asdict() if hasattr(os.uname(),'_asdict') else str(os.uname()),'idle':run(args.idle_seconds,False)}
+    parser=argparse.ArgumentParser();parser.add_argument('--seconds',type=int,default=1800);parser.add_argument('--idle-seconds',type=int,default=30);parser.add_argument('--format',choices=['text','markdown'],default='text');parser.add_argument('--output',default='docs/evidence/performance.json');parser.add_argument('--low-resource',action='store_true');args=parser.parse_args()
+    if min(args.seconds,args.idle_seconds)<2: parser.error('durations must be at least 2 seconds')
+    extra_args=['--low-resource'] if args.low_resource else []
+    report={'environment':os.uname()._asdict() if hasattr(os.uname(),'_asdict') else str(os.uname()),'profile':'low-resource' if args.low_resource else 'default','idle':run(args.idle_seconds,False,extra_args=extra_args)}
     Path(args.output).parent.mkdir(parents=True,exist_ok=True)
     Path(args.output).write_text(json.dumps(report,indent=2))
-    report['stream']=run(args.seconds,True,args.format)
+    report['stream']=run(args.seconds,True,args.format,extra_args)
     Path(args.output).write_text(json.dumps(report,indent=2))
     print(json.dumps({k:({a:b for a,b in v.items() if a!='samples'} if isinstance(v,dict) else v) for k,v in report.items()},indent=2))

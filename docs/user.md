@@ -2,6 +2,17 @@
 
 `mdtui PAGE.md` 启动工作台。它运行在 Linux 设备上，通过普通 SSH PTY 使用；目标机器不需要 Go、Python 或其他运行时。
 
+## 低资源设备
+
+```sh
+./bin/mdtui --low-resource examples/ops/index.md
+./bin/mdtui --stream-buffer-kib 512 --stream-interval 500ms PAGE.md
+```
+
+`--low-resource` 将日志窗口设为 256 KiB / 2000 行，文本日志每 500ms、Markdown 日志每 1s 更新一次；按键和命令结束事件即时处理。暂停的每个父页保留最多约 1 MiB 的原始面板文本，超出预算的整块文本会释放并显示提示，列表、选择和参数保留。返回后按页面原有恢复规则调度；缓存释放本身不会自动重跑命令，尤其不会重跑一次性变更操作。
+
+`--stream-buffer-kib` 支持 64..2048 KiB，`--stream-interval` 支持 100ms..5s，显式参数覆盖低资源预设中的相应值。普通模式默认保留 2 MiB / 10000 行，文本每 100ms、Markdown 最快每 500ms 更新；低资源模式的 Markdown 最快每 1s 更新。所有限制和更新设置会传给子页；命令的 `refresh` 周期、超时和并发配置保持页面定义。窗口满时从最旧完整行淘汰，暂停跟随仍继续收集到有界窗口，导出仅包含已发布的窗口。详细测试方法见[性能说明](performance.md)。
+
 ## 快速开始
 
 在构建机或设备上准备二进制：

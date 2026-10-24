@@ -37,6 +37,7 @@ type job struct {
 	buffer              *content.Buffer
 	revision            uint64
 	once                bool
+	nextRead            time.Time
 }
 type Event struct {
 	ID                  string
@@ -46,19 +47,21 @@ type Event struct {
 	Text                string
 }
 type Engine struct {
-	Page           *document.Page
-	Panels         map[string]*Panel
-	Inputs         map[string]string
-	ParentSelected string
-	Events         chan Event
-	Now            func() time.Time
-	Runner         runner.Executor
-	Log            func(string, ...any)
-	queue          []string
-	sequence       uint64
-	running        int
-	closing        bool
-	paused         bool
+	Page                             *document.Page
+	Panels                           map[string]*Panel
+	Inputs                           map[string]string
+	ParentSelected                   string
+	Events                           chan Event
+	Now                              func() time.Time
+	Runner                           runner.Executor
+	Log                              func(string, ...any)
+	StreamBytes, StreamLines         int
+	StreamInterval, MarkdownInterval time.Duration
+	queue                            []string
+	sequence                         uint64
+	running                          int
+	closing                          bool
+	paused                           bool
 }
 
 func New(p *document.Page, r runner.Executor, now func() time.Time) *Engine {
@@ -224,7 +227,7 @@ func (e *Engine) dispatch() {
 		}
 		e.sequence++
 		ctx, cancel := context.WithCancel(context.Background())
-		j := &job{request: e.sequence, generation: p.Generation, cancel: cancel, buffer: &content.Buffer{}, once: p.queuedRun}
+		j := &job{request: e.sequence, generation: p.Generation, cancel: cancel, buffer: content.NewBuffer(e.StreamBytes, e.StreamLines), once: p.queuedRun}
 		p.queuedRun = false
 		p.pausedOnce = false
 		p.active = j
@@ -363,8 +366,17 @@ func (e *Engine) Tick() bool {
 	changed := false
 	for _, d := range e.Page.Panels {
 		p := e.Panels[d.ID]
-		if e.readStream(p) {
-			changed = true
+		if d.Mode == "stream" && p.active != nil && !e.Now().Before(p.active.nextRead) {
+			// Text defaults to the UI's 100ms tick; custom intervals may coalesce
+			// several ticks. Keeping zero also allows explicit test/manual ticks.
+			interval := e.StreamInterval
+			if d.Format == "markdown" {
+				interval = max(interval, 500*time.Millisecond, e.MarkdownInterval)
+			}
+			p.active.nextRead = e.Now().Add(interval)
+			if e.readStream(p) {
+				changed = true
+			}
 		}
 		if !p.Due.IsZero() && !e.Now().Before(p.Due) {
 			p.Due = time.Time{}
@@ -554,6 +566,23 @@ func (e *Engine) Preview(a document.Action) string {
 	return strings.Join(lines, "\n")
 }
 func (e *Engine) Paused() bool { return e.paused }
+
+// TrimPausedText releases large parent-page output in the opt-in low-resource
+// mode. It never discards list IDs or schedules commands to recreate output.
+func (e *Engine) TrimPausedText(budget int) {
+	if !e.paused || budget <= 0 {
+		return
+	}
+	for _, d := range e.Page.Panels {
+		p := e.Panels[d.ID]
+		if len(p.Text) <= budget {
+			budget -= len(p.Text)
+			continue
+		}
+		p.Text = "[低资源模式：父页输出缓存已释放，请手动刷新]"
+		p.Stale = true
+	}
+}
 
 // Pause 取消在途任务并排空事件，保留已有结果与选择。
 func (e *Engine) Pause() {

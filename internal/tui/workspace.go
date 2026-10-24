@@ -32,14 +32,7 @@ func (u *UI) navigationContext() string {
 // Keep engine cursors indexed into the full list so references and selection
 // retain their stable IDs even when rows are hidden by a filter.
 func (u *UI) visibleItems(p *scheduler.Panel) []int {
-	var indices []int
-	query := strings.ToLower(strings.TrimSpace(u.filters[p.Definition.ID]))
-	for i, item := range p.Items {
-		if query == "" || strings.Contains(strings.ToLower(item.ID+" "+item.Label+" "+item.Description), query) {
-			indices = append(indices, i)
-		}
-	}
-	return indices
+	return u.filtered(p).indices
 }
 
 func (u *UI) ensureVisibleCursor(p *scheduler.Panel, indices []int) {

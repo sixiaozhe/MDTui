@@ -108,6 +108,8 @@ bash scripts/build.sh
 
 支持鼠标上报的终端默认启用鼠标交互。需要终端原生选择、复制时，可运行 `./bin/mdtui --no-mouse PAGE.md` 关闭鼠标接管；全部功能仍可用键盘操作。
 
+资源有限的设备可以使用 `./bin/mdtui --low-resource PAGE.md`：缩小日志窗口、合并日志显示更新，并释放超出预算的父页文本缓存。也可通过 `--stream-buffer-kib 512 --stream-interval 500ms` 单独调整缓存和显示间隔。按键即时处理；这些设置不改变页面的命令刷新周期。具体默认值、取舍和性能复测方法见[性能与低资源模式](docs/performance.md)。
+
 ## 页面就是 Markdown
 
 普通 Markdown 是说明文字，`:::mdtui` 块声明交互元素。下面的详情面板引用列表中选中的对象；MDTUI 会在选择改变时重新查询：

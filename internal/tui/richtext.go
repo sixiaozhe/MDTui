@@ -63,6 +63,7 @@ func wrapRichLine(line string, width int) []string {
 	}
 	var result []string
 	var current strings.Builder
+	current.Grow(min(len(line), width+32))
 	active := ""
 	used := 0
 	for i := 0; i < len(line); {
@@ -96,6 +97,7 @@ func wrapRichLine(line string, width int) []string {
 			if used > 0 && used+cellWidth > width {
 				result = append(result, current.String())
 				current.Reset()
+				current.Grow(min(len(line), width+32))
 				current.WriteString(active)
 				current.WriteString(indent)
 				used = uniseg.StringWidth(indent)
@@ -110,7 +112,7 @@ func wrapRichLine(line string, width int) []string {
 }
 
 func wrapRichLines(lines []string, width int) []string {
-	var wrapped []string
+	wrapped := make([]string, 0, len(lines))
 	for _, line := range lines {
 		wrapped = append(wrapped, wrapRichLine(line, width)...)
 	}

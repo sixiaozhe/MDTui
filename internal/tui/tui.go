@@ -46,6 +46,11 @@ type UI struct {
 	focusedItem              map[string]string
 	filters                  map[string]string
 	filtering                bool
+	itemCache                map[string]filteredItems
+	painted                  map[string]paintedPanel
+	paintStatus              map[string]string
+	paintWidth, paintHeight  int
+	ParentSnapshotBytes      int
 }
 
 type session struct {
@@ -120,6 +125,7 @@ func (u *UI) restoreSession(s session) {
 }
 
 func (u *UI) resetView(page *document.Page) {
+	u.itemCache = nil
 	u.focus = 1 + len(page.Inputs)
 	if len(page.Panels) == 0 {
 		u.focus = 0
@@ -194,9 +200,12 @@ func (u *UI) pushChild(panelID string) {
 	selected := p.Selected
 	parent := u.Engine
 	parent.Pause()
+	parent.TrimPausedText(u.ParentSnapshotBytes)
 	u.sessions = append(u.sessions, u.saveSession())
 	child := scheduler.New(page, parent.Runner, parent.Now)
 	child.Log = parent.Log
+	child.StreamBytes, child.StreamLines = parent.StreamBytes, parent.StreamLines
+	child.StreamInterval, child.MarkdownInterval = parent.StreamInterval, parent.MarkdownInterval
 	child.ParentSelected = selected
 	u.Engine = child
 	u.resetView(page)
@@ -211,6 +220,7 @@ func (u *UI) popChild() bool {
 	last := u.sessions[len(u.sessions)-1]
 	u.sessions = u.sessions[:len(u.sessions)-1]
 	u.restoreSession(last)
+	u.itemCache = nil
 	u.cache = map[string]cached{}
 	u.panelLines = map[string][]string{}
 	u.focusedItem = map[string]string{}
@@ -288,7 +298,7 @@ func (u *UI) Run(ctx context.Context) error {
 		case <-tick.C:
 			if u.Engine.Tick() {
 				u.syncItemFocus()
-				u.Draw()
+				u.drawUpdates()
 			}
 		}
 	}
@@ -929,6 +939,10 @@ func (u *UI) applySGR(base, current tcell.Style, encoded string) tcell.Style {
 func (u *UI) lines(id, source string, renderMarkdown bool, wrapWidth int) []string {
 	c, ok := u.cache[id]
 	if ok && c.source == source && c.width == wrapWidth && c.rendered == renderMarkdown {
+		// Equal repeating log windows can have different backing allocations.
+		// Retain the current window, not an obsolete builder indefinitely.
+		c.source = source
+		u.cache[id] = c
 		return c.lines
 	}
 	if source == "" {
@@ -947,11 +961,17 @@ func (u *UI) lines(id, source string, renderMarkdown bool, wrapWidth int) []stri
 	return lines
 }
 func (u *UI) Draw() {
-	u.mouseRegions = nil
+	u.mouseRegions = u.mouseRegions[:0]
+	u.painted = map[string]paintedPanel{}
+	u.paintStatus = map[string]string{}
+	for id, p := range u.Engine.Panels {
+		u.paintStatus[id] = p.Status
+	}
 	s := u.Screen
 	s.SetStyle(u.baseStyle())
 	s.Clear()
 	w, h := s.Size()
+	u.paintWidth, u.paintHeight = w, h
 	if w < 60 || h < 16 {
 		u.fill(0, 0, w, h, ' ', u.themed(252, 234))
 		u.put(2, 2, w-4, 0, "◆ MDTUI", u.themed(81, -1).Bold(true))
@@ -1221,8 +1241,8 @@ func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
 		u.put(x, row, 1, 0, "│", border)
 		u.put(x+w-1, row, 1, 0, "│", border)
 	}
-	// Snapshot Markdown is rendered off the UI loop. Streams are re-rendered
-	// from their bounded window at the 100 ms scheduler cadence.
+	// Snapshot Markdown is rendered off the UI loop. Streaming Markdown is
+	// coalesced by the scheduler independently of text-stream/input latency.
 	wrapWidth := 0
 	if p.Definition.Format == "markdown" {
 		wrapWidth = w - 4
@@ -1232,22 +1252,7 @@ func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
 	visible := u.visibleItems(p)
 	cursorRow := 0
 	if p.Definition.Format == "items-json" {
-		lines = nil
-		for row, i := range visible {
-			it := p.Items[i]
-			prefix := "   "
-			if it.ID == p.Selected {
-				prefix = " ✓ "
-			}
-			if i == p.Cursor {
-				cursorRow = row
-				prefix = " › "
-				if it.ID == p.Selected {
-					prefix = "›✓ "
-				}
-			}
-			lines = append(lines, prefix+it.Label+"  "+it.Description)
-		}
+		lines, cursorRow = u.itemLines(p, visible)
 		if cursorRow < p.Scroll {
 			p.Scroll = cursorRow
 		}
@@ -1374,6 +1379,10 @@ func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
 	if locationWidth+4 < w {
 		u.fill(x+w-locationWidth-2, y+h-1, locationWidth, 1, ' ', border)
 		u.put(x+w-locationWidth-2, y+h-1, locationWidth, 0, location, border)
+		if u.painted == nil {
+			u.painted = map[string]paintedPanel{}
+		}
+		u.painted[id] = paintedPanel{state: panelState(p), x: x, y: y, w: w, h: h, index: index}
 	}
 }
 

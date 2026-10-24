@@ -107,7 +107,11 @@ type Filter struct {
 }
 
 func (f *Filter) Write(data []byte, final bool) []byte {
-	var out []byte
+	// The common case needs no sanitization or intermediate byte slices.
+	if f.state == 0 && len(f.pending) == 0 && plainText(data) {
+		return data
+	}
+	out := make([]byte, 0, len(data))
 	for _, b := range data {
 		switch f.state {
 		case 0:
@@ -145,7 +149,7 @@ func (f *Filter) Write(data []byte, final bool) []byte {
 	}
 	out = append(f.pending, out...)
 	f.pending = nil
-	var clean []byte
+	clean := make([]byte, 0, len(out))
 	for len(out) > 0 {
 		if !final && !utf8.FullRune(out) {
 			f.pending = append([]byte(nil), out...)
@@ -159,16 +163,37 @@ func (f *Filter) Write(data []byte, final bool) []byte {
 	}
 	return clean
 }
-func Safe(s string) string { var f Filter; return string(f.Write([]byte(s), true)) }
+func plainText(data []byte) bool {
+	for len(data) > 0 {
+		r, n := utf8.DecodeRune(data)
+		if r == utf8.RuneError && n == 1 || unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return false
+		}
+		data = data[n:]
+	}
+	return true
+}
+
+func Safe(s string) string {
+	if plainText([]byte(s)) {
+		return s
+	}
+	var f Filter
+	return string(f.Write([]byte(s), true))
+}
 
 const StreamBytes = 2 << 20
 const StreamLines = 10000
 const MaxLine = 64 << 10
 
 type Buffer struct {
-	mu                 sync.Mutex
-	filter             Filter
-	data               []byte
+	mu     sync.Mutex
+	filter Filter
+	// Builder snapshots are immutable strings. Appending never modifies a
+	// previously returned window; advancing start evicts without shifting bytes.
+	data               strings.Builder
+	start              int
+	maxBytes, maxLines int
 	lineBytes, lines   int
 	dropping           bool
 	Dropped, Truncated int
@@ -178,6 +203,11 @@ type Window struct {
 	Text               string
 	Dropped, Truncated int
 	Revision           uint64
+}
+
+// NewBuffer configures a bounded stream window; zero values use the defaults.
+func NewBuffer(maxBytes, maxLines int) *Buffer {
+	return &Buffer{maxBytes: maxBytes, maxLines: maxLines}
 }
 
 func (b *Buffer) Write(p []byte) (int, error) {
@@ -192,39 +222,63 @@ func (b *Buffer) add(p []byte) {
 		return
 	}
 	b.revision++
-	for _, r := range string(p) {
-		if r == '\n' {
-			b.data = append(b.data, '\n')
+	maxBytes, maxLines := b.maxBytes, b.maxLines
+	if maxBytes <= 0 {
+		maxBytes = StreamBytes
+	}
+	if maxLines <= 0 {
+		maxLines = StreamLines
+	}
+	lineLimit := min(MaxLine, max(1, maxBytes-32))
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		part := p
+		if i >= 0 {
+			part = p[:i]
+		}
+		if !b.dropping {
+			n := min(len(part), max(0, lineLimit-b.lineBytes))
+			// Filter has already validated UTF-8. Never split a rune at the cap.
+			for n > 0 && n < len(part) && !utf8.RuneStart(part[n]) {
+				n--
+			}
+			b.data.Write(part[:n])
+			b.lineBytes += n
+			if n < len(part) {
+				b.dropping = true
+				b.Truncated++
+				b.data.WriteString(" [单行截断]")
+			}
+		}
+		if i >= 0 {
+			b.data.WriteByte('\n')
 			b.lines++
 			b.lineBytes = 0
 			b.dropping = false
-			continue
+			p = p[i+1:]
+		} else {
+			p = nil
 		}
-		if b.dropping {
-			continue
+		for b.data.Len()-b.start > maxBytes || b.lines > maxLines {
+			idx := strings.IndexByte(b.data.String()[b.start:], '\n')
+			if idx < 0 {
+				break
+			}
+			b.start += idx + 1
+			b.lines--
+			b.Dropped++
 		}
-		n := utf8.RuneLen(r)
-		if b.lineBytes+n > MaxLine {
-			b.dropping = true
-			b.Truncated++
-			b.data = append(b.data, []byte(" [单行截断]")...)
-			continue
+		// Compact periodically, not on every read or evicted line. Clone the
+		// remaining window into a new builder so older snapshots stay valid.
+		if b.start >= maxBytes {
+			text := b.data.String()[b.start:]
+			b.data.Reset()
+			// Leave space for the retained window AND the next eviction cycle.
+			// Otherwise Builder growth repeatedly copies the entire retained tail.
+			b.data.Grow(2*maxBytes + lineLimit)
+			b.data.WriteString(text)
+			b.start = 0
 		}
-		b.data = utf8.AppendRune(b.data, r)
-		b.lineBytes += n
-	}
-	for len(b.data) > StreamBytes || b.lines > StreamLines {
-		idx := bytes.IndexByte(b.data, '\n')
-		if idx < 0 {
-			break
-		}
-		b.data = b.data[idx+1:]
-		b.lines--
-		b.Dropped++
-	}
-	// Avoid keeping an arbitrarily large backing allocation after eviction.
-	if cap(b.data) > 2*StreamBytes {
-		b.data = append([]byte(nil), b.data...)
 	}
 }
 func (b *Buffer) Read(after uint64) (Window, bool) {
@@ -233,5 +287,5 @@ func (b *Buffer) Read(after uint64) (Window, bool) {
 	if after == b.revision {
 		return Window{}, false
 	}
-	return Window{string(b.data), b.Dropped, b.Truncated, b.revision}, true
+	return Window{b.data.String()[b.start:], b.Dropped, b.Truncated, b.revision}, true
 }
