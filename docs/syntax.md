@@ -127,9 +127,21 @@ on_select: inspect_interface
 | `refresh` | 否 | 关闭 | 仅 snapshot，最小 `250ms` |
 | `timeout` | 否 | snapshot `5s` / stream `0` | snapshot 必须为正；stream 可为 `0`（不限时） |
 | `autostart` | 否 | `true` | `false` 时等待动作或事件触发 |
+| `max_height` | 否 | 不限制 | 至少 3 的整数，面板最大总行数，包含上下边框 |
 | `open` | 否 | 空 | 仅 items-json snapshot；子页路径或选项映射 |
 | `on_focus` | 否 | 空 | items-json 列表光标项变化时触发的 action ID |
 | `on_select` | 否 | 空 | items-json 列表确认选择变化时触发的 action ID |
+
+`max_height` 限制面板在所有布局及放大视图中的总高度；终端空间不足时实际高度可以更小。省略时沿用自动分配。堆叠布局和主从布局右列会将受限面板省出的空间分配给同列中仍可增长的面板；同列全部达到上限时剩余区域留空。工作区详情标签行不计入面板高度。内容超过可见区域时继续保留，可通过键盘或鼠标滚动，不截断采集结果。
+
+```text
+:::mdtui panel
+id: overview
+title: 概览
+max_height: 6
+exec: ["adapter", "overview"]
+:::
+```
 
 ### 5.1 mode
 
@@ -225,11 +237,16 @@ max_length: 253
 |---|---|---|---|
 | `id` | 是 | — | 全局唯一标识 |
 | `label` | 否 | `id` | 显示名称 |
-| `default` | 否 | 空串 | 不能包含换行；长度受 max_length 限制 |
+| `type` | 否 | `text` | `text`、`toggle`、`select`、`number` |
+| `default` | 否 | 见下文 | 不能包含换行；长度受 max_length 限制 |
 | `required` | 否 | `false` | 为空时依赖面板 blocked |
 | `max_length` | 否 | `256` | 1～4096 个 Unicode 码点 |
+| `options` | select 必填 | — | 1～256 个 `{value, label}` 映射；value 为唯一非空字符串；label 可省略 |
+| `min` / `max` | 否 | 无边界 | 仅 number 可用，64 位十进制整数，min ≤ max |
 
-输入是单行文本，不用于密码。编辑草稿和已提交值分开：
+所有控件通过 `<input-id>.value` 返回字符串，不用于密码。省略 `type` 保持原有单行文本行为。文本和数字默认空串；开关默认 `false`；下拉框默认第一个选项的 value。开关 default 可用 YAML 布尔值或字符串 `"true"` / `"false"`；数字 default 可用整数或整数字符串；文本和下拉值必须是字符串。
+
+文本和数字的编辑草稿和已提交值分开：
 
 - `Enter` 开始编辑；编辑中再次按 `Enter` 提交。
 - `Esc` 放弃本次编辑。
@@ -237,6 +254,37 @@ max_length: 253
 - `Home` / `End` 跳到首尾。
 - `Backspace` / `Delete` 删除。
 - 输入中的 `q`、`/`、`n` 和动作键都作为普通文字。
+
+开关用 Space 或 Enter 立即切换，提交值固定为 `"true"` / `"false"`。下拉框用 Enter 打开，↑↓、PgUp/PgDn、Home/End 移动，Enter 提交选项的 value，Esc 取消；标签只用于显示。选项标签须非空、单行且不超过 256 个 Unicode 码点；value 长度受 max_length 限制。
+
+数字目前仅支持 64 位有符号十进制整数；编辑时 ↑↓ 按 1 调整，并限制在 min/max 内。提交越界、溢出或非整数时保留草稿并提示错误，不修改已提交值。空串可用于清空数字；required 为 true 时会阻止依赖命令执行。数值提交后仍作为单个字符串参数传给命令。
+
+```text
+:::mdtui input
+id: verbose
+label: 详细输出
+type: toggle
+default: false
+:::
+
+:::mdtui input
+id: protocol
+type: select
+options:
+  - value: tcp
+    label: TCP 连接
+  - value: udp
+    label: UDP 数据报
+:::
+
+:::mdtui input
+id: timeout
+type: number
+default: 5
+min: 1
+max: 60
+:::
+```
 
 ## 8. action 块
 
@@ -272,6 +320,7 @@ confirm: "确定重启当前服务？"
 | `run` | 二选一 | — | 目标 panel ID；可针对任意 panel |
 | `refresh` | 二选一 | — | 非空 panel ID 数组；只能针对 snapshot |
 | `confirm` | 否 | 空 | 非空字符串；存在时弹出确认框 |
+| `button` | 否 | `false` | true 时同时显示为可用 Tab 聚焦、Enter 激活的操作按钮 |
 
 规则：
 
@@ -284,6 +333,8 @@ confirm: "确定重启当前服务？"
 - 动作键、F2 菜单和事件绑定可以同时使用。
 
 确认框默认选中“取消”，`Tab` 或左右键切换，`Enter` 执行，`Esc` 关闭。
+
+按钮复用 action 的 run/refresh、依赖禁用、confirm 和快捷键。按钮加入普通焦点循环，位于面板之后；操作栏一次显示一个按钮及其序号。依赖缺失时显示禁用原因，Enter 不会执行。省略 button 的旧页面不新增焦点。控件示例见 [controls.md](../examples/controls.md)。
 
 ## 9. open 与子页导航
 
@@ -323,7 +374,10 @@ open:
 - 进入时父页暂停调度并保留选择、滚动、焦点和已有结果。
 - 子页内 `Esc` 或 `q` 返回父页；根页 `q` 退出。
 - 返回后父页恢复刷新。
+- 返回后可再次 Enter 进入同一项；重新进入时创建新的子页会话。
 - 子页可以用 `{ref: "parent.selected.id"}` 读取打开它时的父页选中项。
+
+每个子页可以继续声明带 open 的 items-json 列表，从而组成多层导航。`parent.selected.id` 始终读取直接父页，不递归引用祖先；每层 page.parent 要与打开该页的列表 ID 一致。完整示例见 [multilevel.md](../examples/multilevel.md) → [multilevel-interfaces.md](../examples/multilevel-interfaces.md) → [multilevel-diagnostic.md](../examples/multilevel-diagnostic.md)。
 
 ### 9.4 与 on_select 的关系
 
@@ -538,19 +592,19 @@ version, id, title, layout, sidebar, parent, max_parallel
 ### panel
 
 ```text
-id, title, mode, format, exec, refresh, timeout, autostart, open, on_focus, on_select
+id, title, mode, format, exec, refresh, timeout, autostart, open, on_focus, on_select, max_height
 ```
 
 ### input
 
 ```text
-id, label, default, required, max_length
+id, label, type, default, required, max_length, options, min, max
 ```
 
 ### action
 
 ```text
-id, label, key, run, refresh, confirm
+id, label, key, run, refresh, confirm, button
 ```
 
 ## 18. 可运行示例
@@ -558,5 +612,9 @@ id, label, key, run, refresh, confirm
 - [Linux 运维工作台](../examples/linux-workbench.md)
 - [网络调试](../examples/network.md)
 - [输入参数](../examples/input.md)
+- [表单控件：开关、下拉、数字和按钮](../examples/controls.md)
+- [功能体验台](../examples/showcase.md)
+- [三级设备导航](../examples/multilevel.md)
+- [面板最大高度](../examples/panel-height.md)
 - [页面跳转](../examples/navigation.md)
 - [巡检台](../examples/inspection.md)

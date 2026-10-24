@@ -206,3 +206,38 @@ func TestResolveSymlinkCycle(t *testing.T) {
 		t.Fatal("accepted symlink cycle")
 	}
 }
+
+func TestCheckSharedSubtreeDepth(t *testing.T) {
+	for _, last := range []int{6, 7} {
+		t.Run(fmt.Sprintf("last%d", last), func(t *testing.T) {
+			dir := t.TempDir()
+			panel := func(id, target string) string {
+				return fmt.Sprintf(":::mdtui panel\nid: %s\nformat: items-json\nexec: [echo]\nopen: ./%s.md\n:::\n", id, target)
+			}
+			root := writePage(t, dir, "root.md", pageBody("root", "", panel("short", "shared")+panel("long", "p2")))
+			writePage(t, dir, "shared.md", pageBody("shared", "", panel("next", "leaf")))
+			writePage(t, dir, "leaf.md", pageBody("leaf", "", ""))
+			for i := 2; i <= last; i++ {
+				target := fmt.Sprintf("p%d", i+1)
+				if i == last {
+					target = "shared"
+				}
+				writePage(t, dir, fmt.Sprintf("p%d.md", i), pageBody(fmt.Sprintf("p%d", i), "", panel("next", target)))
+			}
+			loads := 0
+			pages, err := check(root, func(path string) (*Page, error) { loads++; return Load(path) })
+			if last == 7 {
+				if err == nil || !strings.Contains(err.Error(), "超过 8 层") {
+					t.Fatalf("nine-level shared path: err = %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(pages) != 8 || loads != 8 {
+					t.Fatalf("pages = %d, loads = %d; want 8 each", len(pages), loads)
+				}
+			}
+		})
+	}
+}

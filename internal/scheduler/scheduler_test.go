@@ -812,3 +812,18 @@ func TestCursorReferenceAndInvalidation(t *testing.T) {
 		t.Fatal(e.Panels["preview"].Text)
 	}
 }
+
+func TestRefreshPreservesCursorID(t *testing.T) {
+	e, f, _ := loaded(t)
+	e.Panels["list"].Cursor = 1
+	e.Request("list")
+	finish(t, e, receive(t, f), `{"version":1,"items":[{"id":"B","label":"two"},{"id":"A","label":"one"}]}`)
+	if p := e.Panels["list"]; p.Cursor != 0 || p.Items[p.Cursor].ID != "B" {
+		t.Fatal("refresh moved cursor to another object")
+	}
+	e.Request("list")
+	finish(t, e, receive(t, f), `{"version":1,"items":[]}`)
+	if e.Panels["list"].Cursor != 0 {
+		t.Fatal("empty list cursor was not clamped")
+	}
+}

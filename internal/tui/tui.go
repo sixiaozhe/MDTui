@@ -20,6 +20,10 @@ type UI struct {
 	Screen                   tcell.Screen
 	Engine                   *scheduler.Engine
 	NoColor                  bool
+	NoMouse                  bool
+	mouseRegions             []mouseRegion
+	mouseButtons             tcell.ButtonMask
+	lastClick                mouseClick
 	focus                    int
 	notice, modal, draft     string
 	editing                  bool
@@ -39,8 +43,9 @@ type UI struct {
 	zoom                     bool
 	workspaceDetail          string
 	sessions                 []session
-	opened                   map[string]string
 	focusedItem              map[string]string
+	filters                  map[string]string
+	filtering                bool
 }
 
 type session struct {
@@ -54,7 +59,7 @@ type session struct {
 	SearchQuery     string
 	SearchIndex     int
 	SearchFocus     int
-	Opened          map[string]string
+	Filters         map[string]string
 }
 
 type cached struct {
@@ -79,7 +84,7 @@ func New(s tcell.Screen, e *scheduler.Engine, noColor bool) *UI {
 			break
 		}
 	}
-	return &UI{Screen: s, Engine: e, NoColor: noColor, focus: focus, workspaceDetail: detail, searchIndex: -1, searchFocus: -1, cache: map[string]cached{}, panelLines: map[string][]string{}, opened: map[string]string{}, focusedItem: map[string]string{}}
+	return &UI{Screen: s, Engine: e, NoColor: noColor, focus: focus, workspaceDetail: detail, searchIndex: -1, searchFocus: -1, cache: map[string]cached{}, panelLines: map[string][]string{}, focusedItem: map[string]string{}}
 }
 
 func (u *UI) depth() int { return len(u.sessions) + 1 }
@@ -100,7 +105,7 @@ func (u *UI) saveSession() session {
 		SearchQuery:     u.searchQuery,
 		SearchIndex:     u.searchIndex,
 		SearchFocus:     u.searchFocus,
-		Opened:          u.opened,
+		Filters:         u.filters,
 	}
 }
 
@@ -111,7 +116,7 @@ func (u *UI) restoreSession(s session) {
 	u.workspaceDetail = s.WorkspaceDetail
 	u.proseScroll, u.proseX = s.ProseScroll, s.ProseX
 	u.searchQuery, u.searchIndex, u.searchFocus = s.SearchQuery, s.SearchIndex, s.SearchFocus
-	u.opened = s.Opened
+	u.filters = s.Filters
 }
 
 func (u *UI) resetView(page *document.Page) {
@@ -141,14 +146,13 @@ func (u *UI) resetView(page *document.Page) {
 	u.cache = map[string]cached{}
 	u.panelLines = map[string][]string{}
 	u.focusedItem = map[string]string{}
+	u.filters = map[string]string{}
+	u.filtering = false
 }
 
 func (u *UI) pushChild(panelID string) {
 	p := u.Engine.Panels[panelID]
 	if p == nil || !p.Definition.HasOpen() || p.Selected == "" {
-		return
-	}
-	if u.opened[panelID] == p.Selected {
 		return
 	}
 	ref, ok := p.Definition.OpenTarget(p.Selected)
@@ -189,14 +193,12 @@ func (u *UI) pushChild(panelID string) {
 	}
 	selected := p.Selected
 	parent := u.Engine
-	u.opened[panelID] = selected
 	parent.Pause()
 	u.sessions = append(u.sessions, u.saveSession())
 	child := scheduler.New(page, parent.Runner, parent.Now)
 	child.Log = parent.Log
 	child.ParentSelected = selected
 	u.Engine = child
-	u.opened = map[string]string{}
 	u.resetView(page)
 	child.Start()
 }
@@ -230,6 +232,10 @@ func (u *UI) Close() {
 
 func (u *UI) Run(ctx context.Context) error {
 	defer u.Close()
+	if !u.NoMouse {
+		u.Screen.EnableMouse(tcell.MouseButtonEvents)
+		defer u.Screen.DisableMouse()
+	}
 	events := make(chan tcell.Event, 32)
 	stop := make(chan struct{})
 	defer close(stop)
@@ -269,7 +275,10 @@ func (u *UI) Run(ctx context.Context) error {
 				}
 				u.syncItemFocus()
 			case *tcell.EventResize:
+				u.lastClick = mouseClick{}
 				u.Screen.Sync()
+			case *tcell.EventMouse:
+				u.Mouse(v)
 			}
 			u.Draw()
 		case ev := <-u.Engine.Events:
@@ -284,7 +293,9 @@ func (u *UI) Run(ctx context.Context) error {
 		}
 	}
 }
-func (u *UI) count() int { return 1 + len(u.Engine.Page.Inputs) + len(u.Engine.Page.Panels) }
+func (u *UI) count() int {
+	return 1 + len(u.Engine.Page.Inputs) + len(u.Engine.Page.Panels) + len(u.buttons())
+}
 func (u *UI) panel() *scheduler.Panel {
 	i := u.focus - 1 - len(u.Engine.Page.Inputs)
 	if i < 0 || i >= len(u.Engine.Page.Panels) {
@@ -318,17 +329,19 @@ func (u *UI) moveFocus(step int) {
 }
 
 func (u *UI) syncItemFocus() {
-	if u.modal != "" || u.searching || u.editing {
+	if u.modal != "" || u.searching || u.editing || u.filtering {
 		return
 	}
 	p := u.panel()
-	if p == nil || p.Definition.Format != "items-json" || p.Definition.OnFocus == "" {
+	if p == nil || p.Definition.Format != "items-json" {
 		return
 	}
-	if len(p.Items) == 0 {
+	visible := u.visibleItems(p)
+	if len(visible) == 0 {
 		delete(u.focusedItem, p.Definition.ID)
 		return
 	}
+	u.ensureVisibleCursor(p, visible)
 	index := min(max(p.Cursor, 0), len(p.Items)-1)
 	id := p.Items[index].ID
 	if u.focusedItem[p.Definition.ID] == id {
@@ -388,6 +401,38 @@ func (u *UI) cycleWorkspaceView(step int) {
 	u.focus = u.panelFocus(u.workspaceDetail)
 }
 func (u *UI) Key(k *tcell.EventKey) bool {
+	u.lastClick = mouseClick{}
+	if u.modal == "select" {
+		u.selectKey(k)
+		return false
+	}
+	if u.filtering {
+		switch k.Key() {
+		case tcell.KeyEscape:
+			u.filtering = false
+		case tcell.KeyEnter:
+			if u.filters == nil {
+				u.filters = map[string]string{}
+			}
+			if p := u.panel(); p != nil {
+				u.filters[p.Definition.ID] = u.searchDraft
+				p.Scroll = 0
+			}
+			u.filtering = false
+			u.searchIndex = -1
+			u.syncItemFocus()
+		case tcell.KeyBackspace, tcell.KeyBackspace2:
+			r := []rune(u.searchDraft)
+			if len(r) > 0 {
+				u.searchDraft = string(r[:len(r)-1])
+			}
+		case tcell.KeyRune:
+			if !unicode.IsControl(k.Rune()) && utf8.RuneCountInString(u.searchDraft) < 256 {
+				u.searchDraft += string(k.Rune())
+			}
+		}
+		return false
+	}
 	if u.modal != "" {
 		switch k.Key() {
 		case tcell.KeyEscape:
@@ -466,12 +511,22 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 	}
 	if u.editing {
 		input := u.Engine.Page.Inputs[u.focus-1]
+		if input.Type == "number" && (k.Key() == tcell.KeyUp || k.Key() == tcell.KeyDown) {
+			direction := 1
+			if k.Key() == tcell.KeyDown {
+				direction = -1
+			}
+			u.stepNumber(input, direction)
+			return false
+		}
 		switch k.Key() {
 		case tcell.KeyEscape:
 			u.editing = false
 		case tcell.KeyEnter:
-			u.Engine.Submit(input.ID, u.draft)
-			u.editing = false
+			u.notice = u.Engine.Submit(input.ID, u.draft)
+			if u.notice == "" {
+				u.editing = false
+			}
 		case tcell.KeyBackspace, tcell.KeyBackspace2:
 			previous := previousGrapheme(u.draft, u.draftCursor)
 			u.draft = replaceRunes(u.draft, previous, u.draftCursor, "")
@@ -502,6 +557,23 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 	case tcell.KeyF2:
 		u.modal = "actions"
 		u.menu = 0
+	case tcell.KeyF3:
+		if p := u.panel(); p != nil && p.Definition.Format == "items-json" {
+			u.filtering = true
+			u.searchDraft = u.filters[p.Definition.ID]
+			u.notice = ""
+		} else {
+			u.notice = "请先聚焦列表，再按 F3 过滤"
+		}
+	case tcell.KeyF4:
+		path, err := u.exportSnapshot(".")
+		if err != nil {
+			u.notice = "导出失败: " + err.Error()
+		} else {
+			u.notice = "已导出: " + path
+		}
+		u.modal = "export"
+		u.modalScroll, u.modalX = 0, 0
 	case tcell.KeyEscape:
 		if u.zoom {
 			u.zoom = false
@@ -510,16 +582,15 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 		}
 	case tcell.KeyEnter:
 		if u.focus > 0 && u.focus <= len(u.Engine.Page.Inputs) {
-			u.editing = true
-			u.draft = u.Engine.Inputs[u.Engine.Page.Inputs[u.focus-1].ID]
-			u.draftCursor = utf8.RuneCountInString(u.draft)
-			u.inputX = 0
-		} else if p := u.panel(); p != nil && p.Definition.Format == "items-json" && len(p.Items) > 0 {
+			u.activateInput(u.Engine.Page.Inputs[u.focus-1])
+		} else if button := u.focusedButton(); button != nil {
+			u.activate(*button)
+		} else if p := u.panel(); p != nil && p.Definition.Format == "items-json" && len(u.visibleItems(p)) > 0 {
+			u.ensureVisibleCursor(p, u.visibleItems(p))
 			before := p.Selected
 			u.Engine.Select(p.Definition.ID, p.Items[p.Cursor].ID)
 			u.selectWorkspaceView(p.Definition.ID)
 			if p.Selected != before {
-				delete(u.opened, p.Definition.ID)
 				u.triggerAction(p.Definition.OnSelect)
 			}
 			if p.Definition.HasOpen() && p.Selected != "" {
@@ -581,6 +652,10 @@ func (u *UI) Key(k *tcell.EventKey) bool {
 			return false
 		}
 		if k.Rune() == ' ' {
+			if u.focus > 0 && u.focus <= len(u.Engine.Page.Inputs) && u.Engine.Page.Inputs[u.focus-1].Type == "toggle" {
+				u.activateInput(u.Engine.Page.Inputs[u.focus-1])
+				return false
+			}
 			if p := u.panel(); p != nil && p.Definition.Mode == "stream" {
 				p.Follow = !p.Follow
 			}
@@ -632,6 +707,10 @@ func (u *UI) perform(a document.Action) {
 }
 func (u *UI) scroll(key tcell.Key) {
 	p := u.panel()
+	if p != nil && p.Definition.Format == "items-json" && key != tcell.KeyLeft && key != tcell.KeyRight {
+		u.scrollFiltered(p, key)
+		return
+	}
 	pos, x := &u.proseScroll, &u.proseX
 	if p != nil {
 		pos = &p.Scroll
@@ -670,7 +749,7 @@ func (u *UI) scroll(key tcell.Key) {
 	}
 }
 func (u *UI) style(active bool) tcell.Style {
-	s := tcell.StyleDefault
+	s := u.baseStyle()
 	if active {
 		s = s.Bold(true)
 		if !u.NoColor {
@@ -681,7 +760,7 @@ func (u *UI) style(active bool) tcell.Style {
 }
 
 func (u *UI) themed(fg, bg int) tcell.Style {
-	s := tcell.StyleDefault
+	s := u.baseStyle()
 	if u.NoColor {
 		return s
 	}
@@ -703,17 +782,17 @@ func (u *UI) statusStyle(status string) tcell.Style {
 	}
 	switch status {
 	case "ready":
-		return u.themed(78, 22).Bold(true)
+		return u.palette(colorSuccess, colorSurface)
 	case "running", "queued":
-		return u.themed(222, 58).Bold(true)
+		return u.palette(colorWarning, colorElevated).Bold(true)
 	case "error":
-		return u.themed(210, 52).Bold(true)
+		return u.palette(colorDanger, 0x382832).Bold(true)
 	case "blocked":
-		return u.themed(245, 236)
+		return u.palette(colorMuted, colorSurface)
 	case "cancelled":
-		return u.themed(208, 52)
+		return u.palette(colorWarning, colorSurface)
 	default:
-		return u.themed(250, 236)
+		return u.palette(colorMuted, colorSurface)
 	}
 }
 
@@ -868,7 +947,9 @@ func (u *UI) lines(id, source string, renderMarkdown bool, wrapWidth int) []stri
 	return lines
 }
 func (u *UI) Draw() {
+	u.mouseRegions = nil
 	s := u.Screen
+	s.SetStyle(u.baseStyle())
 	s.Clear()
 	w, h := s.Size()
 	if w < 60 || h < 16 {
@@ -885,14 +966,24 @@ func (u *UI) Draw() {
 		return
 	}
 	page := u.Engine.Page
-	header := u.themed(231, 24).Bold(true)
+	header := u.palette(colorText, colorElevated).Bold(true)
 	if u.NoColor {
 		header = tcell.StyleDefault.Reverse(true).Bold(true)
 	}
 	u.fill(0, 0, w, 1, ' ', header)
-	u.put(2, 0, w-4, 0, "◆ MDTUI   "+page.Title, header)
 	pageID := "PAGE · " + page.ID
-	u.put(max(2, w-uniseg.StringWidth(pageID)-2), 0, uniseg.StringWidth(pageID), 0, pageID, header.Dim(true))
+	idWidth := min(uniseg.StringWidth(pageID), max(12, w/3))
+	idX := w - idWidth - 2
+	u.put(2, 0, 9, 0, "◆ MDTUI", u.palette(colorAccent, colorElevated).Bold(true))
+	u.put(12, 0, max(0, idX-14), 0, fitText(page.Title, max(0, idX-14)), header)
+	u.put(idX, 0, idWidth, 0, fitText(pageID, idWidth), u.palette(colorMuted, colorElevated))
+	contextX := 2
+	if len(u.sessions) > 0 {
+		u.put(2, 1, 8, 0, "‹ 返回", u.themed(81, -1).Bold(true))
+		u.addMouse(mouseRegion{x: 2, y: 1, w: 8, h: 1, kind: "back"})
+		contextX = 11
+	}
+	u.put(contextX, 1, max(0, w-contextX-23), 0, fitText(u.navigationContext(), max(0, w-contextX-23)), u.mutedStyle())
 	y := 2
 	if u.zoom {
 		y = 2
@@ -909,9 +1000,9 @@ func (u *UI) Draw() {
 			u.put(max(2, w-uniseg.StringWidth(position)-2), 1, uniseg.StringWidth(position), 0, position, u.themed(245, -1))
 		}
 		for i := 0; i < ph; i++ {
-			bar := u.themed(81, -1)
+			bar := u.palette(colorBorder, colorCanvas)
 			if u.focus == 0 {
-				bar = bar.Bold(true)
+				bar = u.accentStyle().Bold(true)
 			}
 			rail := "│"
 			if u.focus == 0 && u.searchFocus == 0 && u.proseScroll+i == u.searchIndex {
@@ -923,12 +1014,13 @@ func (u *UI) Draw() {
 			if richNoWrap(line) {
 				offset = u.proseX
 			}
-			u.putRich(3, y+i, w-5, offset, line, tcell.StyleDefault)
+			u.putRich(3, y+i, w-5, offset, line, u.baseStyle())
 			if u.focus == 0 {
 				u.highlightMatches(3, y+i, w-5, offset, line)
 			}
 		}
 		if ph > 0 {
+			u.addMouse(mouseRegion{x: 1, y: y, w: w - 2, h: ph, kind: "prose"})
 			y += ph + 1
 		}
 		// Inputs occupy a compact focusable strip, preserving room for panel content.
@@ -939,15 +1031,15 @@ func (u *UI) Draw() {
 			}
 			input := page.Inputs[idx]
 			value := u.Engine.Inputs[input.ID]
+			value, mode := inputDisplay(input, value)
 			active := u.focus == idx+1
-			inputStyle := u.themed(252, 236)
-			if active {
-				inputStyle = u.themed(231, 24).Bold(true)
-			}
+			inputStyle := u.controlStyle(false)
 			u.fill(1, y, w-2, 1, ' ', inputStyle)
-			mode := "Enter 编辑"
 			if u.editing {
 				mode = "Enter 提交 · Esc 放弃"
+				if input.Type == "number" {
+					mode = "↑↓ 调整 · Enter 提交 · Esc 放弃"
+				}
 			}
 			label := fmt.Sprintf("⌘ 参数 %d/%d   %s   › ", idx+1, len(page.Inputs), input.Label)
 			modeX := max(3, w-uniseg.StringWidth(mode)-3)
@@ -968,8 +1060,21 @@ func (u *UI) Draw() {
 			} else {
 				u.inputX = 0
 			}
-			u.put(valueX, y, valueWidth, u.inputX, value, inputStyle)
-			u.put(modeX, y, uniseg.StringWidth(mode), 0, mode, inputStyle.Dim(true))
+			valueStyle := u.controlStyle(active)
+			u.fill(valueX, y, valueWidth, 1, ' ', valueStyle)
+			u.put(valueX, y, valueWidth, u.inputX, value, valueStyle)
+			u.put(modeX, y, uniseg.StringWidth(mode), 0, mode, u.palette(colorMuted, colorElevated))
+			u.addMouse(mouseRegion{x: 1, y: y, w: w - 2, h: 1, kind: "input", index: idx})
+			if len(page.Inputs) > 1 {
+				u.put(1, y, 1, 0, "‹", inputStyle)
+				u.put(w-2, y, 1, 0, "›", inputStyle)
+				u.addMouse(mouseRegion{x: 1, y: y, w: 1, h: 1, kind: "input-prev", index: idx})
+				u.addMouse(mouseRegion{x: w - 2, y: y, w: 1, h: 1, kind: "input-next", index: idx})
+			}
+			y += 2
+		}
+		if len(u.buttons()) > 0 {
+			u.drawButtons(y, w)
 			y += 2
 		}
 	}
@@ -989,29 +1094,24 @@ func (u *UI) Draw() {
 		} else if page.Layout == "master-detail" && w >= 100 && n > 1 {
 			sw := max(24, w*30/100)
 			u.drawPanel(page.Sidebar, 0, y, sw, avail, "")
-			row := 0
 			rightX := sw + 1
 			rightW := w - rightX
-			rightAvailable := avail - (n - 2)
+			var rightPanels []document.Panel
 			for _, p := range page.Panels {
-				if p.ID == page.Sidebar {
-					continue
+				if p.ID != page.Sidebar {
+					rightPanels = append(rightPanels, p)
 				}
-				height := rightAvailable / (n - 1)
-				if row == n-2 {
-					height = rightAvailable - (rightAvailable/(n-1))*row
-				}
-				u.drawPanel(p.ID, rightX, y+(rightAvailable/(n-1)+1)*row, rightW, height, "")
-				row++
+			}
+			heights, top := panelHeights(rightPanels, avail), y
+			for i, p := range rightPanels {
+				u.drawPanel(p.ID, rightX, top, rightW, heights[i], "")
+				top += heights[i] + 1
 			}
 		} else {
-			panelAvailable := avail - (n - 1)
+			heights, top := panelHeights(page.Panels, avail), y
 			for i, p := range page.Panels {
-				height := panelAvailable / n
-				if i == n-1 {
-					height = panelAvailable - (panelAvailable/n)*i
-				}
-				u.drawPanel(p.ID, 0, y+(panelAvailable/n+1)*i, w, height, "")
+				u.drawPanel(p.ID, 0, top, w, heights[i], "")
+				top += heights[i] + 1
 			}
 		}
 	}
@@ -1022,23 +1122,18 @@ func (u *UI) Draw() {
 	if u.searching {
 		context = "/ " + u.searchDraft + "▏    Enter 查找 · Esc 取消"
 	}
-	u.put(2, h-2, w-4, 0, context, u.themed(222, -1).Bold(true))
-	footer := u.themed(250, 235)
-	if u.NoColor {
-		footer = tcell.StyleDefault.Reverse(true)
+	if u.filtering {
+		context = "过滤: " + u.searchDraft + "▏  Enter 应用 · 空值清除 · Esc 取消"
 	}
-	u.fill(0, h-1, w, 1, ' ', footer)
-	shortcuts := "Tab 焦点   [ ] 视图   / 搜索   Enter 确认   F2 动作   Z 放大   ? 帮助   q 退出"
-	if len(u.sessions) > 0 {
-		shortcuts = fmt.Sprintf("子页 %d/%d   Esc/q 返回   Tab 焦点   [ ] 视图   Enter 确认   F2 动作   Z 放大", u.depth(), document.MaxDepth)
+	contextStyle := u.mutedStyle()
+	if u.notice != "" {
+		contextStyle = u.palette(colorWarning, colorCanvas)
 	}
-	if w < 90 {
-		shortcuts = "Tab 焦点   Enter 确认   F2 动作   Z 放大   ? 帮助   q 退出"
-		if len(u.sessions) > 0 {
-			shortcuts = fmt.Sprintf("子页 %d/%d   Esc/q 返回   Tab 焦点   Enter 确认", u.depth(), document.MaxDepth)
-		}
+	if u.editing || u.searching || u.filtering {
+		contextStyle = u.accentStyle()
 	}
-	u.put(2, h-1, w-4, 0, shortcuts, footer)
+	u.put(2, h-2, w-4, 0, context, contextStyle)
+	u.drawShortcuts(w, h-1)
 	if u.modal != "" {
 		u.drawModal(w, h)
 	}
@@ -1070,7 +1165,8 @@ func (u *UI) drawWorkspace(x, y, w, h int) {
 			return
 		}
 	}
-	var tabs []string
+	u.fill(rightX+1, y, rightW-2, 1, ' ', u.surfaceStyle())
+	tabX := rightX + 1
 	for i, p := range page.Panels {
 		if p.ID == page.Sidebar {
 			continue
@@ -1079,33 +1175,45 @@ func (u *UI) drawWorkspace(x, y, w, h int) {
 		if p.ID == u.workspaceDetail {
 			label = "▸" + label
 		}
-		tabs = append(tabs, label)
+		tabWidth := min(uniseg.StringWidth(label), max(0, rightX+rightW-1-tabX))
+		tabStyle := u.palette(colorMuted, colorSurface)
+		if p.ID == u.workspaceDetail {
+			tabStyle = u.controlStyle(true)
+		}
+		u.fill(tabX, y, tabWidth, 1, ' ', tabStyle)
+		u.put(tabX, y, tabWidth, 0, label, tabStyle)
+		u.addMouse(mouseRegion{x: tabX, y: y, w: min(uniseg.StringWidth(label), rightX+rightW-1-tabX), h: 1, kind: "tab", focus: u.panelFocus(p.ID)})
+		tabX += uniseg.StringWidth(label) + 2
 	}
-	u.put(rightX+1, y, rightW-2, 0, strings.Join(tabs, "  "), u.themed(81, -1).Bold(true))
 	u.drawPanel(u.workspaceDetail, rightX, y+1, rightW, h-1, "")
 }
 func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
+	p := u.Engine.Panels[id]
+	if p.Definition.MaxHeight > 0 {
+		h = min(h, p.Definition.MaxHeight)
+	}
 	if h < 3 || w < 8 {
 		return
 	}
-	p := u.Engine.Panels[id]
+	u.addMouse(mouseRegion{x: x, y: y, w: w, h: h, kind: "panel", focus: u.panelFocus(id)})
 	active := u.panel() == p
-	border := u.themed(240, -1)
-	if active {
-		border = u.themed(81, -1).Bold(true)
-	}
+	u.fill(x, y, w, h, ' ', u.surfaceStyle())
+	border := u.panelBorder(active)
 	u.put(x, y, w, 0, "╭"+strings.Repeat("─", w-2)+"╮", border)
 	panelTitle := " " + p.Definition.Title + index + " "
-	panelTitleWidth := min(w-4, uniseg.StringWidth(panelTitle))
-	u.fill(x+2, y, panelTitleWidth, 1, ' ', border)
-	u.put(x+2, y, panelTitleWidth, 0, panelTitle, border.Bold(true))
 	badge := statusLabel(p.Status)
 	if p.Stale {
 		badge = " ⚠ 过期 "
 	}
 	badgeWidth := uniseg.StringWidth(badge)
+	panelTitleWidth := min(max(0, w-badgeWidth-6), uniseg.StringWidth(panelTitle))
+	u.fill(x+2, y, panelTitleWidth, 1, ' ', border)
+	u.put(x+2, y, panelTitleWidth, 0, fitText(panelTitle, panelTitleWidth), u.surfaceStyle().Bold(active))
 	if badgeWidth+4 < w {
 		badgeStyle := u.statusStyle(p.Status)
+		if p.Stale {
+			badgeStyle = u.palette(colorWarning, colorSurface)
+		}
 		u.fill(x+w-badgeWidth-2, y, badgeWidth, 1, ' ', badgeStyle)
 		u.put(x+w-badgeWidth-2, y, badgeWidth, 0, badge, badgeStyle)
 	}
@@ -1121,23 +1229,30 @@ func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
 	}
 	lines := u.lines(id, p.Text, p.Definition.Format == "markdown" && p.Definition.Mode == "stream", wrapWidth)
 	rows := h - 2
+	visible := u.visibleItems(p)
+	cursorRow := 0
 	if p.Definition.Format == "items-json" {
 		lines = nil
-		for i, it := range p.Items {
-			prefix := "  "
+		for row, i := range visible {
+			it := p.Items[i]
+			prefix := "   "
 			if it.ID == p.Selected {
-				prefix = "✓ "
+				prefix = " ✓ "
 			}
 			if i == p.Cursor {
-				prefix = ">" + prefix
+				cursorRow = row
+				prefix = " › "
+				if it.ID == p.Selected {
+					prefix = "›✓ "
+				}
 			}
 			lines = append(lines, prefix+it.Label+"  "+it.Description)
 		}
-		if p.Cursor < p.Scroll {
-			p.Scroll = p.Cursor
+		if cursorRow < p.Scroll {
+			p.Scroll = cursorRow
 		}
-		if p.Cursor >= p.Scroll+rows {
-			p.Scroll = p.Cursor - rows + 1
+		if cursorRow >= p.Scroll+rows {
+			p.Scroll = cursorRow - rows + 1
 		}
 	}
 	u.panelLines[id] = lines
@@ -1147,20 +1262,23 @@ func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
 	p.Scroll = min(p.Scroll, max(0, len(lines)-rows))
 	if len(lines) > rows && rows > 0 {
 		thumb := y + 1 + min(rows-1, p.Scroll*rows/len(lines))
-		u.put(x+w-1, thumb, 1, 0, "┃", u.themed(81, -1).Bold(true))
+		u.put(x+w-1, thumb, 1, 0, "┃", u.palette(colorAccent, colorSurface).Bold(true))
 	}
 	for i := 0; i < rows && p.Scroll+i < len(lines); i++ {
+		if p.Definition.Format == "items-json" {
+			u.addMouse(mouseRegion{x: x + 1, y: y + 1 + i, w: w - 2, h: 1, kind: "item", focus: u.panelFocus(id), index: visible[p.Scroll+i]})
+		}
 		if active && u.searchFocus == u.focus && p.Scroll+i == u.searchIndex {
 			u.put(x, y+1+i, 1, 0, "┃", u.themed(81, -1).Bold(true))
 		}
-		rowStyle := tcell.StyleDefault
+		rowStyle := u.surfaceStyle()
 		if p.Definition.Format == "items-json" {
-			itemIndex := p.Scroll + i
+			itemIndex := visible[p.Scroll+i]
 			if itemIndex == p.Cursor {
-				rowStyle = u.themed(231, 24).Bold(true)
+				rowStyle = u.controlStyle(active)
 				u.fill(x+1, y+1+i, w-2, 1, ' ', rowStyle)
 			} else if itemIndex < len(p.Items) && p.Items[itemIndex].ID == p.Selected {
-				rowStyle = u.themed(78, -1).Bold(true)
+				rowStyle = u.palette(colorSuccess, colorSurface).Bold(true)
 			}
 		}
 		if p.Definition.Format == "markdown" {
@@ -1175,12 +1293,53 @@ func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
 			}
 		} else {
 			u.put(x+2, y+1+i, w-4, p.X, lines[p.Scroll+i], rowStyle)
+			if p.Definition.Format == "items-json" {
+				item := p.Items[visible[p.Scroll+i]]
+				start := 3 + uniseg.StringWidth(item.Label) + 2
+				left := max(0, start-p.X)
+				descriptionStyle := rowStyle.Dim(true)
+				if !u.NoColor {
+					descriptionStyle = rowStyle.Foreground(tcell.NewHexColor(colorMuted))
+				}
+				u.put(x+2+left, y+1+i, max(0, w-4-left), max(0, p.X-start), item.Description, descriptionStyle)
+			}
 			if active {
 				u.highlightMatches(x+2, y+1+i, w-4, p.X, lines[p.Scroll+i])
 			}
 		}
 	}
+	if len(lines) == 0 {
+		title, hint := "暂无输出", ""
+		switch p.Status {
+		case "idle":
+			title, hint = "等待执行", "使用动作菜单或操作按钮开始"
+		case "running":
+			title = "正在采集…"
+		case "queued":
+			title = "已加入执行队列"
+		case "blocked":
+			title, hint = "等待选择或参数", p.Reason
+		case "error":
+			title, hint = "采集失败", p.Reason
+		case "cancelled":
+			title, hint = "已取消", "通过动作菜单重新执行"
+		default:
+			if p.Definition.Format == "items-json" {
+				title = "列表为空"
+				if u.filters[id] != "" {
+					title = "没有匹配项"
+				}
+			}
+		}
+		u.put(x+3, y+1, max(0, w-6), 0, fitText(title, max(0, w-6)), u.palette(colorMuted, colorSurface))
+		if rows > 1 && hint != "" {
+			u.put(x+3, y+2, max(0, w-6), 0, fitText(hint, max(0, w-6)), u.palette(colorMuted, colorSurface).Dim(true))
+		}
+	}
 	foot := p.Reason
+	if query := u.filters[id]; query != "" {
+		foot = fmt.Sprintf("过滤 %q · %d/%d 项", query, len(visible), len(p.Items))
+	}
 	if foot == "" {
 		if !p.Updated.IsZero() {
 			foot = "更新 " + p.Updated.Format("15:04:05")
@@ -1201,13 +1360,13 @@ func (u *UI) drawPanel(id string, x, y, w, h int, index string) {
 	}
 	u.put(x, y+h-1, w, 0, "╰"+strings.Repeat("─", w-2)+"╯", border)
 	if foot != "" {
-		u.put(x+2, y+h-1, w-16, 0, " "+foot+" ", u.themed(245, -1))
+		u.put(x+2, y+h-1, w-16, 0, " "+foot+" ", u.palette(colorMuted, colorSurface))
 	}
 	position := 0
 	if len(lines) > 0 {
 		position = min(p.Scroll+1, len(lines))
 		if p.Definition.Format == "items-json" {
-			position = min(p.Cursor+1, len(lines))
+			position = min(cursorRow+1, len(lines))
 		}
 	}
 	location := fmt.Sprintf(" %d/%d ", position, len(lines))
@@ -1227,12 +1386,35 @@ func (u *UI) fill(x, y, width, height int, ch rune, style tcell.Style) {
 	}
 }
 func (u *UI) drawModal(w, h int) {
+	u.mouseRegions = nil // Modal overlays must never forward clicks to the page.
 	title := ""
 	var lines []string
+	confirmChoiceIndex := -1
+	choiceRows := map[int]bool{}
 	switch u.modal {
+	case "select":
+		input := u.Engine.Page.Inputs[u.focus-1]
+		title = "◆ " + input.Label
+		for i, option := range input.Options {
+			prefix := "  "
+			if i == u.menu {
+				prefix = "› "
+			}
+			selected := ""
+			if option.Value == u.Engine.Inputs[input.ID] {
+				selected = " ✓"
+			}
+			lines = append(lines, prefix+option.Label+selected)
+		}
+	case "export":
+		title = "◆ 诊断导出"
+		lines = []string{u.notice, "", "Enter 或 Esc 关闭"}
 	case "help":
 		title = "? 快捷键帮助"
 		lines = []string{"Tab / Shift+Tab   切换说明、输入和面板", "[ / ]             切换工作区详情视图", "↑↓ / PgUp PgDn    移动、翻页（列表需 Enter 确认）", "←→ / Home End     横向查看代码和宽表、跳到首尾", "/ / n / N         搜索当前区域、下一个、上一个匹配", "输入：←→ Home End 移动；Backspace / Del 删除", "Enter / Esc       编辑、提交或放弃输入", "F2 / !            动作列表、当前面板错误详情", "Z / Esc          放大当前面板、退出放大", "Space / End       暂停跟随、恢复日志跟随", "Ctrl+C            取消当前任务；q 在根页退出", "Esc / q          子页返回上一层", "", "链接地址会显示在链接文字之后。"}
+		lines = append(lines, "F3                过滤当前列表（空值清除，Esc 取消）", "F4                导出当前页到启动目录的 Markdown 文件")
+		lines = append(lines, "参数：Space/Enter 切换开关；Enter 打开下拉框", "数字编辑：↑↓ 加减，Enter 校验提交，Esc 放弃", "按钮：Tab 聚焦，Enter 激活（保留动作确认流程）")
+		lines = append(lines, "鼠标：单击定位，双击列表确认，滚轮滚动", "点击参数、按钮、详情标签和顶部返回均可操作", "启动加 --no-mouse 可关闭鼠标接管")
 	case "errors":
 		title = "! 错误详情"
 		if p := u.panel(); p != nil {
@@ -1260,23 +1442,30 @@ func (u *UI) drawModal(w, h int) {
 		if u.confirm {
 			choice = "○ 取消      ● 执行"
 		}
+		confirmChoiceIndex = len(lines) + 1
 		lines = append(lines, "", choice, "←→ 或 Tab 切换   Enter 确认   Esc 取消")
 	}
 	mw := min(w-6, 100)
-	if u.modal == "confirm" {
+	if u.modal == "confirm" || u.modal == "export" {
 		var wrapped []string
-		for _, line := range lines {
+		for originalIndex, line := range lines {
 			var part strings.Builder
 			width := 0
 			g := uniseg.NewGraphemes(line)
 			for g.Next() {
 				if width+g.Width() > mw-6 {
+					if originalIndex == confirmChoiceIndex {
+						choiceRows[len(wrapped)] = true
+					}
 					wrapped = append(wrapped, part.String())
 					part.Reset()
 					width = 0
 				}
 				part.WriteString(g.Str())
 				width += g.Width()
+			}
+			if originalIndex == confirmChoiceIndex {
+				choiceRows[len(wrapped)] = true
 			}
 			wrapped = append(wrapped, part.String())
 		}
@@ -1285,10 +1474,12 @@ func (u *UI) drawModal(w, h int) {
 	mh := min(h-4, len(lines)+4)
 	x := (w - mw) / 2
 	y := (h - mh) / 2
-	shadow := u.themed(0, 0)
+	u.addMouse(mouseRegion{x: x, y: y, w: mw, h: mh, kind: "modal"})
+	u.addMouse(mouseRegion{x: x + mw - 13, y: y, w: 11, h: 1, kind: "close"})
+	shadow := u.palette(colorCanvas, colorCanvas)
 	u.fill(x+2, y+1, mw, mh, ' ', shadow)
-	panel := u.themed(252, 235)
-	border := u.themed(81, 235).Bold(true)
+	panel := u.surfaceStyle()
+	border := u.panelBorder(true)
 	u.fill(x, y, mw, mh, ' ', panel)
 	u.put(x, y, mw, 0, "╭"+strings.Repeat("─", mw-2)+"╮", border)
 	u.put(x, y+mh-1, mw, 0, "╰"+strings.Repeat("─", mw-2)+"╯", border)
@@ -1301,23 +1492,36 @@ func (u *UI) drawModal(w, h int) {
 	u.fill(x+2, y, modalTitleWidth, 1, ' ', panel)
 	u.put(x+2, y, modalTitleWidth, 0, modalTitle, border)
 	u.fill(x+mw-13, y, 11, 1, ' ', panel)
-	u.put(x+mw-13, y, 11, 0, " Esc 关闭 ", u.themed(245, 235))
+	u.put(x+mw-13, y, 11, 0, " Esc 关闭 ", u.palette(colorMuted, colorSurface))
 	u.modalScroll = min(u.modalScroll, max(0, len(lines)-(mh-4)))
 	start := u.modalScroll
-	if u.modal == "actions" && u.menu >= mh-4 {
+	if (u.modal == "actions" || u.modal == "select") && u.menu >= mh-4 {
 		start = u.menu - (mh - 5)
 	}
 	for j := 0; j < mh-4 && j+start < len(lines); j++ {
 		lineIndex := j + start
 		style := panel
-		if u.modal == "actions" && lineIndex == u.menu {
-			style = u.themed(231, 24).Bold(true)
+		if (u.modal == "actions" || u.modal == "select") && lineIndex == u.menu {
+			style = u.controlStyle(true)
 			u.fill(x+2, y+2+j, mw-4, 1, ' ', style)
 		}
-		if u.modal == "confirm" && (strings.HasPrefix(lines[lineIndex], "●") || strings.HasPrefix(lines[lineIndex], "○")) {
-			style = u.themed(222, 235).Bold(true)
+		if choiceRows[lineIndex] {
+			style = u.palette(colorWarning, colorSurface).Bold(true)
 		}
 		u.put(x+3, y+2+j, mw-6, u.modalX, lines[lineIndex], style)
+		if u.modal == "actions" || u.modal == "select" {
+			u.addMouse(mouseRegion{x: x + 2, y: y + 2 + j, w: mw - 4, h: 1, kind: "menu", index: lineIndex})
+		}
+		if choiceRows[lineIndex] {
+			for _, choice := range []struct{ text, kind string }{{"取消", "cancel"}, {"执行", "execute"}} {
+				if pos := strings.Index(lines[lineIndex], choice.text); pos >= 0 {
+					start := uniseg.StringWidth(lines[lineIndex][:pos]) - 2
+					left := max(x+3, x+3+start-u.modalX)
+					right := min(x+mw-3, x+3+start+6-u.modalX)
+					u.addMouse(mouseRegion{x: left, y: y + 2 + j, w: right - left, h: 1, kind: choice.kind})
+				}
+			}
+		}
 	}
-	u.put(x+3, y+mh-2, mw-6, 0, "↑↓ 滚动", u.themed(245, 235))
+	u.put(x+3, y+mh-2, mw-6, 0, "↑↓ 滚动", u.palette(colorMuted, colorSurface))
 }

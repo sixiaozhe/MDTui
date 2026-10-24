@@ -352,9 +352,10 @@ func TestPageNavigationPushPop(t *testing.T) {
 		t.Fatal("selection lost after return")
 	}
 	u.pushChild("list")
-	if len(u.sessions) != 0 {
-		t.Fatal("same selection reopened child")
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "A" {
+		t.Fatal("same selection did not reopen child")
 	}
+	u.popChild()
 	u.Engine.Select("list", "B")
 	u.pushChild("list")
 	if len(u.sessions) != 1 || u.Engine.ParentSelected != "B" {
@@ -500,6 +501,53 @@ func TestPageNavigationFailedLoadLeavesParentRunning(t *testing.T) {
 	}
 }
 
+func TestMultilevelRestoresEachParentContext(t *testing.T) {
+	dir := t.TempDir()
+	child := ":::mdtui page\nversion: 1\nid: child\nparent: list\n:::\n:::mdtui input\nid: note\ndefault: initial\n:::\n:::mdtui panel\nid: list\nformat: items-json\nautostart: false\nexec: [echo]\nopen: ./grand.md\n:::\n"
+	writePage(t, dir, "grand.md", ":::mdtui page\nversion: 1\nid: grand\nparent: list\n:::\n:::mdtui panel\nid: detail\nautostart: false\nexec: [echo, {ref: parent.selected.id}]\n:::\n")
+	u := navUIAt(t, dir, child)
+	t.Cleanup(u.Close)
+	applyFilter(u, "B")
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if u.Engine.ParentSelected != "B" {
+		t.Fatal("second level lost device selection")
+	}
+	u.Engine.Panels["list"].Items = []content.Item{{ID: "X", Label: "first"}, {ID: "Y", Label: "second"}}
+	u.Engine.Submit("note", "saved child parameter")
+	applyFilter(u, "Y")
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	args, reason := u.Engine.Args("detail")
+	if reason != "" || args[1] != "Y" {
+		t.Fatalf("third-level args=%v reason=%s", args, reason)
+	}
+	if got := u.navigationContext(); !strings.Contains(got, "root → child [B] → grand") {
+		t.Fatal(got)
+	}
+	if !u.sessions[0].Engine.Paused() || !u.sessions[1].Engine.Paused() {
+		t.Fatal("ancestor still running")
+	}
+	u.popChild()
+	if u.Engine.Page.ID != "child" || u.Engine.Paused() || !u.sessions[0].Engine.Paused() {
+		t.Fatal("incorrect page resumed")
+	}
+	if u.filters["list"] != "Y" || u.Engine.Panels["list"].Cursor != 1 || u.Engine.Inputs["note"] != "saved child parameter" || u.focus != 2 {
+		t.Fatal("second-level state was not restored")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if u.Engine.Page.ID != "grand" {
+		t.Fatal("could not revisit same third-level selection")
+	}
+	u.popChild()
+	u.popChild()
+	if u.filters["list"] != "B" || u.Engine.Panels["list"].Selected != "B" || u.Engine.Paused() {
+		t.Fatal("root state was not restored")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
+	if u.Engine.Page.ID != "child" || u.Engine.ParentSelected != "B" {
+		t.Fatal("could not revisit same device")
+	}
+}
+
 type holdRunner struct {
 	started   chan struct{}
 	stopped   chan struct{}
@@ -525,9 +573,10 @@ func TestSelectionOpensChildPage(t *testing.T) {
 	}
 	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
 	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
-	if len(u.sessions) != 0 {
-		t.Fatal("same selection reopened child")
+	if len(u.sessions) != 1 || u.Engine.ParentSelected != "A" {
+		t.Fatal("same selection did not reopen child")
 	}
+	u.Key(tcell.NewEventKey(tcell.KeyEscape, 0, 0))
 	u.Key(tcell.NewEventKey(tcell.KeyDown, 0, 0))
 	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
 	if len(u.sessions) != 1 || u.Engine.ParentSelected != "B" {
@@ -667,5 +716,31 @@ func TestOnSelectActionTriggers(t *testing.T) {
 	u.Key(tcell.NewEventKey(tcell.KeyEnter, 0, 0))
 	if u.Engine.Panels["detail"].Request == 0 {
 		t.Fatal("selection did not run bound action")
+	}
+}
+
+func TestCursorDependencyWithoutOnFocus(t *testing.T) {
+	u := testUI(t)
+	defer u.Close()
+	d := &u.Engine.Page.Panels[1]
+	d.Exec = []document.Arg{{Literal: "false"}, {Ref: "list.cursor.id"}}
+	d.Autostart = true
+	u.Engine.Panels["detail"].Definition = *d
+	u.syncItemFocus()
+	before := u.Engine.Panels["detail"].Generation
+	u.syncItemFocus()
+	if u.Engine.Panels["detail"].Generation != before {
+		t.Fatal("unchanged cursor invalidated detail")
+	}
+	u.Key(tcell.NewEventKey(tcell.KeyDown, 0, 0))
+	if u.Engine.Panels["detail"].Generation != before+1 {
+		t.Fatal("cursor movement without on_focus did not invalidate detail")
+	}
+	args, reason := u.Engine.Args("detail")
+	if reason != "" || len(args) != 2 || args[1] != "B" {
+		t.Fatalf("detail args = %v, reason = %q", args, reason)
+	}
+	if u.Engine.Panels["detail"].Status != "queued" && u.Engine.Panels["detail"].Status != "running" {
+		t.Fatal("cursor dependency was not scheduled")
 	}
 }

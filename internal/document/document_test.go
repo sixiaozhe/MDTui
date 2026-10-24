@@ -13,6 +13,13 @@ func TestCompilerContracts(t *testing.T) {
 		valid      bool
 	}{
 		{"minimal", header, true},
+		{"panel-max-height", header + ":::mdtui panel\nid: x\nexec: [echo]\nmax_height: 5\n:::\n", true},
+		{"panel-max-height-min", header + ":::mdtui panel\nid: x\nexec: [echo]\nmax_height: 3\n:::\n", true},
+		{"panel-max-height-small", header + ":::mdtui panel\nid: x\nexec: [echo]\nmax_height: 2\n:::\n", false},
+		{"panel-max-height-zero", header + ":::mdtui panel\nid: x\nexec: [echo]\nmax_height: 0\n:::\n", false},
+		{"panel-max-height-negative", header + ":::mdtui panel\nid: x\nexec: [echo]\nmax_height: -1\n:::\n", false},
+		{"panel-max-height-string", header + ":::mdtui panel\nid: x\nexec: [echo]\nmax_height: '5'\n:::\n", false},
+		{"panel-max-height-fraction", header + ":::mdtui panel\nid: x\nexec: [echo]\nmax_height: 4.5\n:::\n", false},
 		{"workspace-sidebar", strings.Replace(header, "id: test", "id: test\nlayout: workspace\nsidebar: list", 1) + ":::mdtui panel\nid: list\nexec: [echo]\n:::\n", true},
 		{"workspace-missing-sidebar", strings.Replace(header, "id: test", "id: test\nlayout: workspace", 1), false},
 		{"code", "```text\n:::mdtui panel\ninvalid\n```\n" + header, true},
@@ -73,6 +80,22 @@ func TestOpenPathIsTrimmed(t *testing.T) {
 	}
 	if len(p.Panels) != 1 || p.Panels[0].Open != "./child.md" {
 		t.Fatalf("open = %q", p.Panels[0].Open)
+	}
+}
+
+func TestPanelMaxHeightValue(t *testing.T) {
+	for _, height := range []int{0, 5} {
+		field := ""
+		if height > 0 {
+			field = "max_height: 5\n"
+		}
+		p, err := Parse("height.md", []byte(header+":::mdtui panel\nid: overview\nexec: [echo]\n"+field+":::\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Panels[0].MaxHeight != height {
+			t.Fatalf("max_height=%d want=%d", p.Panels[0].MaxHeight, height)
+		}
 	}
 }
 

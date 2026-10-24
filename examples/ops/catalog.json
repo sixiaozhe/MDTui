@@ -1,0 +1,2511 @@
+{
+  "areas": [
+    {
+      "id": "system",
+      "label": "系统与硬件",
+      "description": "发行版、CPU、内存、内核和虚拟化"
+    },
+    {
+      "id": "process",
+      "label": "进程与性能",
+      "description": "CPU、线程、打开文件和进程下钻"
+    },
+    {
+      "id": "network",
+      "label": "网络与连通性",
+      "description": "网卡、路由、端口、DNS、HTTP 和 TLS"
+    },
+    {
+      "id": "storage",
+      "label": "磁盘与文件系统",
+      "description": "容量、inode、挂载、IO 与磁盘健康"
+    },
+    {
+      "id": "services",
+      "label": "服务与启动",
+      "description": "systemd、失败服务、依赖与服务下钻"
+    },
+    {
+      "id": "logs",
+      "label": "日志与事件",
+      "description": "journal、内核、服务日志与文件跟随"
+    },
+    {
+      "id": "users",
+      "label": "用户与会话",
+      "description": "在线会话、账户、组和登录历史"
+    },
+    {
+      "id": "security",
+      "label": "安全检查",
+      "description": "防火墙、SELinux、AppArmor 和审计"
+    },
+    {
+      "id": "packages",
+      "label": "软件包",
+      "description": "Debian/RPM 包、文件归属和本地更新清单"
+    },
+    {
+      "id": "containers",
+      "label": "Docker 容器",
+      "description": "容器下钻、镜像、网络、卷和资源"
+    },
+    {
+      "id": "kubernetes",
+      "label": "Kubernetes",
+      "description": "节点、Pod、工作负载、事件和日志"
+    },
+    {
+      "id": "schedules",
+      "label": "定时任务",
+      "description": "cron、systemd timers 和 at 队列"
+    },
+    {
+      "id": "files",
+      "label": "文件诊断",
+      "description": "属性、目录、权限、占用、查找和哈希"
+    },
+    {
+      "id": "databases",
+      "label": "数据库检查",
+      "description": "Redis、PostgreSQL、MySQL 和 SQLite"
+    },
+    {
+      "id": "changes",
+      "label": "变更操作",
+      "description": "单独确认的服务操作、进程终止和容器重启"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "system.os",
+      "area": "system",
+      "label": "发行版与内核",
+      "description": "查看发行版标识和内核版本",
+      "commands": [
+        {
+          "program": "cat",
+          "args": [
+            "/etc/os-release"
+          ]
+        },
+        {
+          "program": "uname",
+          "args": [
+            "-a"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.kernel",
+      "area": "system",
+      "label": "内核版本",
+      "description": "内核、主机名和体系架构",
+      "commands": [
+        {
+          "program": "uname",
+          "args": [
+            "-a"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.uptime",
+      "area": "system",
+      "label": "运行时间与负载",
+      "description": "运行时间和 1/5/15 分钟平均负载",
+      "commands": [
+        {
+          "program": "uptime",
+          "args": []
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.cpu",
+      "area": "system",
+      "label": "CPU 拓扑",
+      "description": "CPU 型号、核心和 NUMA 信息",
+      "commands": [
+        {
+          "program": "lscpu",
+          "args": []
+        },
+        {
+          "program": "cat",
+          "args": [
+            "/proc/cpuinfo"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.memory",
+      "area": "system",
+      "label": "内存与交换区",
+      "description": "内存、缓存和 swap 使用情况",
+      "commands": [
+        {
+          "program": "free",
+          "args": [
+            "-h"
+          ]
+        },
+        {
+          "program": "cat",
+          "args": [
+            "/proc/meminfo"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.vmstat",
+      "area": "system",
+      "label": "短时性能采样",
+      "description": "每秒采样一次，共三次，不启动交互式监控",
+      "commands": [
+        {
+          "program": "vmstat",
+          "args": [
+            "1",
+            "3"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.time",
+      "area": "system",
+      "label": "时钟与时区",
+      "description": "时间、时区及同步状态",
+      "commands": [
+        {
+          "program": "timedatectl",
+          "args": [
+            "status"
+          ]
+        },
+        {
+          "program": "date",
+          "args": [
+            "--iso-8601=seconds"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.virtualization",
+      "area": "system",
+      "label": "虚拟化环境",
+      "description": "判断容器或虚拟机环境",
+      "commands": [
+        {
+          "program": "systemd-detect-virt",
+          "args": []
+        },
+        {
+          "program": "hostnamectl",
+          "args": [
+            "status"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.pci",
+      "area": "system",
+      "label": "PCI 设备",
+      "description": "PCI 设备及厂商标识",
+      "commands": [
+        {
+          "program": "lspci",
+          "args": [
+            "-nn"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "system.usb",
+      "area": "system",
+      "label": "USB 设备",
+      "description": "USB 设备清单",
+      "commands": [
+        {
+          "program": "lsusb",
+          "args": []
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.cpu",
+      "area": "process",
+      "label": "CPU 排序",
+      "description": "按 CPU 使用率显示进程",
+      "commands": [
+        {
+          "program": "ps",
+          "args": [
+            "-eo",
+            "pid,ppid,user,%cpu,%mem,comm",
+            "--sort=-%cpu"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.memory",
+      "area": "process",
+      "label": "内存排序",
+      "description": "按内存使用率显示进程",
+      "commands": [
+        {
+          "program": "ps",
+          "args": [
+            "-eo",
+            "pid,ppid,user,%cpu,%mem,rss,comm",
+            "--sort=-%mem"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.tree",
+      "area": "process",
+      "label": "进程树",
+      "description": "显示 PID 与父子关系",
+      "commands": [
+        {
+          "program": "pstree",
+          "args": [
+            "-p"
+          ]
+        },
+        {
+          "program": "ps",
+          "args": [
+            "-ef",
+            "--forest"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.detail",
+      "area": "process",
+      "label": "按 PID 查看",
+      "description": "进入真实进程列表，再下钻查看进程",
+      "commands": [
+        {
+          "program": "ps",
+          "args": [
+            "-p",
+            "{target}",
+            "-o",
+            "pid,ppid,user,lstart,etime,state,%cpu,%mem,args"
+          ]
+        }
+      ],
+      "target_kind": "pid",
+      "default_target": "1",
+      "target_hint": "进程 PID，例如 1；本任务也提供列表下钻",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.threads",
+      "area": "process",
+      "label": "线程列表",
+      "description": "指定进程的线程、CPU 与状态",
+      "commands": [
+        {
+          "program": "ps",
+          "args": [
+            "-T",
+            "-p",
+            "{target}",
+            "-o",
+            "pid,tid,psr,pcpu,state,comm"
+          ]
+        }
+      ],
+      "target_kind": "pid",
+      "default_target": "1",
+      "target_hint": "进程 PID",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.files",
+      "area": "process",
+      "label": "打开文件",
+      "description": "指定 PID 的文件描述符；缺少 lsof 时查看 /proc",
+      "commands": [
+        {
+          "program": "lsof",
+          "args": [
+            "-nP",
+            "-p",
+            "{target}"
+          ]
+        },
+        {
+          "program": "ls",
+          "args": [
+            "-l",
+            "--",
+            "/proc/{target}/fd"
+          ]
+        }
+      ],
+      "target_kind": "pid",
+      "default_target": "1",
+      "target_hint": "进程 PID",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.limits",
+      "area": "process",
+      "label": "资源限制",
+      "description": "指定进程的资源限制",
+      "commands": [
+        {
+          "program": "cat",
+          "args": [
+            "--",
+            "/proc/{target}/limits"
+          ]
+        }
+      ],
+      "target_kind": "pid",
+      "default_target": "1",
+      "target_hint": "进程 PID",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.status",
+      "area": "process",
+      "label": "内核进程状态",
+      "description": "查看 /proc/PID/status 的进程状态",
+      "commands": [
+        {
+          "program": "cat",
+          "args": [
+            "--",
+            "/proc/{target}/status"
+          ]
+        }
+      ],
+      "target_kind": "pid",
+      "default_target": "1",
+      "target_hint": "进程 PID",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.top",
+      "area": "process",
+      "label": "top 单次采样",
+      "description": "非交互式 top 快照",
+      "commands": [
+        {
+          "program": "top",
+          "args": [
+            "-b",
+            "-n",
+            "1"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "process.pidstat",
+      "area": "process",
+      "label": "进程短时采样",
+      "description": "采样进程 CPU、内存与 IO，两次",
+      "commands": [
+        {
+          "program": "pidstat",
+          "args": [
+            "-dur",
+            "1",
+            "2"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.interfaces",
+      "area": "network",
+      "label": "网卡列表",
+      "description": "进入真实网卡列表并查看地址与链路",
+      "commands": [
+        {
+          "program": "ip",
+          "args": [
+            "-br",
+            "addr"
+          ]
+        },
+        {
+          "program": "ifconfig",
+          "args": [
+            "-a"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.interface",
+      "area": "network",
+      "label": "指定网卡统计",
+      "description": "指定网卡的地址、链路和收发计数",
+      "commands": [
+        {
+          "program": "ip",
+          "args": [
+            "-s",
+            "addr",
+            "show",
+            "dev",
+            "{target}"
+          ]
+        },
+        {
+          "program": "ifconfig",
+          "args": [
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "interface",
+      "default_target": "lo",
+      "target_hint": "网卡名称，例如 lo 或 eth0",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.routes",
+      "area": "network",
+      "label": "IPv4 路由",
+      "description": "主路由表",
+      "commands": [
+        {
+          "program": "ip",
+          "args": [
+            "route",
+            "show"
+          ]
+        },
+        {
+          "program": "route",
+          "args": [
+            "-n"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.routes6",
+      "area": "network",
+      "label": "IPv6 路由",
+      "description": "IPv6 主路由表",
+      "commands": [
+        {
+          "program": "ip",
+          "args": [
+            "-6",
+            "route",
+            "show"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.listeners",
+      "area": "network",
+      "label": "监听端口",
+      "description": "TCP/UDP 监听与进程信息，权限不足时部分信息不可见",
+      "commands": [
+        {
+          "program": "ss",
+          "args": [
+            "-tulnp"
+          ]
+        },
+        {
+          "program": "netstat",
+          "args": [
+            "-tulnp"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.connections",
+      "area": "network",
+      "label": "活动连接",
+      "description": "TCP 活动连接与计时器",
+      "commands": [
+        {
+          "program": "ss",
+          "args": [
+            "-tanpo"
+          ]
+        },
+        {
+          "program": "netstat",
+          "args": [
+            "-tanp"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.neighbors",
+      "area": "network",
+      "label": "邻居与 ARP",
+      "description": "IPv4/IPv6 邻居缓存",
+      "commands": [
+        {
+          "program": "ip",
+          "args": [
+            "neigh",
+            "show"
+          ]
+        },
+        {
+          "program": "arp",
+          "args": [
+            "-an"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.resolver",
+      "area": "network",
+      "label": "DNS 配置",
+      "description": "系统名称解析器状态",
+      "commands": [
+        {
+          "program": "resolvectl",
+          "args": [
+            "status"
+          ]
+        },
+        {
+          "program": "cat",
+          "args": [
+            "/etc/resolv.conf"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.dns",
+      "area": "network",
+      "label": "名称解析",
+      "description": "使用本机 NSS/DNS 配置解析目标",
+      "commands": [
+        {
+          "program": "getent",
+          "args": [
+            "ahosts",
+            "{target}"
+          ]
+        },
+        {
+          "program": "dig",
+          "args": [
+            "+time=2",
+            "+tries=1",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "host",
+      "default_target": "localhost",
+      "target_hint": "主机名或 IP",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "network.ping",
+      "area": "network",
+      "label": "ICMP 诊断",
+      "description": "向明确指定的目标发送三次探测",
+      "commands": [
+        {
+          "program": "ping",
+          "args": [
+            "-c",
+            "3",
+            "-W",
+            "2",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "host",
+      "default_target": "127.0.0.1",
+      "target_hint": "主机名或 IP",
+      "timeout_seconds": 12
+    },
+    {
+      "id": "network.trace",
+      "area": "network",
+      "label": "路由追踪",
+      "description": "最多八跳的路由诊断；超时也显示已有输出",
+      "commands": [
+        {
+          "program": "traceroute",
+          "args": [
+            "-m",
+            "8",
+            "-w",
+            "1",
+            "{target}"
+          ]
+        },
+        {
+          "program": "tracepath",
+          "args": [
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "host",
+      "default_target": "127.0.0.1",
+      "target_hint": "主机名或 IP",
+      "timeout_seconds": 12
+    },
+    {
+      "id": "network.http",
+      "area": "network",
+      "label": "HTTP 响应头",
+      "description": "仅请求 HTTP/HTTPS 响应头，最多八秒",
+      "commands": [
+        {
+          "program": "curl",
+          "args": [
+            "--head",
+            "--location",
+            "--max-time",
+            "8",
+            "--connect-timeout",
+            "3",
+            "--silent",
+            "--show-error",
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "url",
+      "default_target": "http://127.0.0.1",
+      "target_hint": "完整 http:// 或 https:// URL；不接受内嵌账户密码",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "network.tls",
+      "area": "network",
+      "label": "TLS 握手",
+      "description": "读取指定端点的 TLS 握手摘要；stdin 关闭，不发送业务数据",
+      "commands": [
+        {
+          "program": "openssl",
+          "args": [
+            "s_client",
+            "-connect",
+            "{target}",
+            "-brief"
+          ]
+        }
+      ],
+      "target_kind": "endpoint",
+      "default_target": "localhost:443",
+      "target_hint": "主机:端口，例如 localhost:443",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "network.statistics",
+      "area": "network",
+      "label": "协议栈统计",
+      "description": "汇总协议栈计数器",
+      "commands": [
+        {
+          "program": "nstat",
+          "args": [
+            "-az"
+          ]
+        },
+        {
+          "program": "netstat",
+          "args": [
+            "-s"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "storage.blocks",
+      "area": "storage",
+      "label": "块设备与文件系统",
+      "description": "磁盘、分区、文件系统和挂载点",
+      "commands": [
+        {
+          "program": "lsblk",
+          "args": [
+            "-o",
+            "NAME,TYPE,SIZE,FSTYPE,UUID,MOUNTPOINT"
+          ]
+        },
+        {
+          "program": "lsblk",
+          "args": []
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "storage.space",
+      "area": "storage",
+      "label": "容量使用率",
+      "description": "各文件系统的容量和可用空间",
+      "commands": [
+        {
+          "program": "df",
+          "args": [
+            "-hT"
+          ]
+        },
+        {
+          "program": "df",
+          "args": [
+            "-h"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "storage.inodes",
+      "area": "storage",
+      "label": "inode 使用率",
+      "description": "定位 inode 耗尽",
+      "commands": [
+        {
+          "program": "df",
+          "args": [
+            "-hi"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "storage.mounts",
+      "area": "storage",
+      "label": "挂载关系",
+      "description": "挂载源、目标及选项",
+      "commands": [
+        {
+          "program": "findmnt",
+          "args": [
+            "-r"
+          ]
+        },
+        {
+          "program": "mount",
+          "args": []
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "storage.usage",
+      "area": "storage",
+      "label": "目录占用",
+      "description": "显式执行目录容量统计；大目录可能超时",
+      "commands": [
+        {
+          "program": "du",
+          "args": [
+            "-h",
+            "--max-depth=1",
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/var/log",
+      "target_hint": "绝对目录路径",
+      "timeout_seconds": 12
+    },
+    {
+      "id": "storage.io",
+      "area": "storage",
+      "label": "磁盘 IO 采样",
+      "description": "两次扩展 IO 采样，需要 sysstat",
+      "commands": [
+        {
+          "program": "iostat",
+          "args": [
+            "-xz",
+            "1",
+            "2"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "storage.smart",
+      "area": "storage",
+      "label": "磁盘 SMART 报告",
+      "description": "只读取磁盘健康报告，不执行自检或修改参数",
+      "commands": [
+        {
+          "program": "smartctl",
+          "args": [
+            "-a",
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "device",
+      "default_target": "/dev/sda",
+      "target_hint": "块设备绝对路径，例如 /dev/sda",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "storage.swap",
+      "area": "storage",
+      "label": "交换区",
+      "description": "当前 swap 设备及使用情况",
+      "commands": [
+        {
+          "program": "swapon",
+          "args": [
+            "--show"
+          ]
+        },
+        {
+          "program": "cat",
+          "args": [
+            "/proc/swaps"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "services.running",
+      "area": "services",
+      "label": "运行中的服务",
+      "description": "当前运行的 systemd 服务",
+      "commands": [
+        {
+          "program": "systemctl",
+          "args": [
+            "list-units",
+            "--type=service",
+            "--state=running",
+            "--no-pager",
+            "--plain",
+            "--no-legend"
+          ]
+        },
+        {
+          "program": "service",
+          "args": [
+            "--status-all"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "services.failed",
+      "area": "services",
+      "label": "失败的单元",
+      "description": "systemd 失败单元及状态",
+      "commands": [
+        {
+          "program": "systemctl",
+          "args": [
+            "--failed",
+            "--no-pager",
+            "--plain"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "services.installed",
+      "area": "services",
+      "label": "已安装的服务",
+      "description": "服务文件和启用状态",
+      "commands": [
+        {
+          "program": "systemctl",
+          "args": [
+            "list-unit-files",
+            "--type=service",
+            "--no-pager"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "services.detail",
+      "area": "services",
+      "label": "服务对象下钻",
+      "description": "从服务列表进入状态页",
+      "commands": [
+        {
+          "program": "systemctl",
+          "args": [
+            "status",
+            "--no-pager",
+            "--full",
+            "{target}"
+          ]
+        },
+        {
+          "program": "service",
+          "args": [
+            "{target}",
+            "status"
+          ]
+        }
+      ],
+      "target_kind": "unit",
+      "default_target": "ssh",
+      "target_hint": "服务名，例如 ssh 或 ssh.service",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "services.unit",
+      "area": "services",
+      "label": "服务定义",
+      "description": "只读展示单元配置及 drop-in",
+      "commands": [
+        {
+          "program": "systemctl",
+          "args": [
+            "cat",
+            "--no-pager",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "unit",
+      "default_target": "ssh",
+      "target_hint": "服务名",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "services.dependencies",
+      "area": "services",
+      "label": "服务依赖",
+      "description": "查看依赖关系，不改变服务状态",
+      "commands": [
+        {
+          "program": "systemctl",
+          "args": [
+            "list-dependencies",
+            "--no-pager",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "unit",
+      "default_target": "ssh",
+      "target_hint": "服务名",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "services.boot",
+      "area": "services",
+      "label": "启动耗时",
+      "description": "systemd 启动耗时排序",
+      "commands": [
+        {
+          "program": "systemd-analyze",
+          "args": [
+            "blame",
+            "--no-pager"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "logs.recent",
+      "area": "logs",
+      "label": "系统近期日志",
+      "description": "读取最近日志，可进一步启用跟随",
+      "commands": [
+        {
+          "program": "journalctl",
+          "args": [
+            "-n",
+            "{limit}",
+            "--no-pager",
+            "-o",
+            "short-iso"
+          ]
+        },
+        {
+          "program": "tail",
+          "args": [
+            "-n",
+            "{limit}",
+            "--",
+            "/var/log/syslog"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6,
+      "follow": [
+        {
+          "program": "journalctl",
+          "args": [
+            "-f",
+            "-n",
+            "{limit}",
+            "--no-pager",
+            "-o",
+            "short-iso"
+          ]
+        },
+        {
+          "program": "tail",
+          "args": [
+            "-n",
+            "{limit}",
+            "-F",
+            "--",
+            "/var/log/syslog"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "logs.kernel",
+      "area": "logs",
+      "label": "内核日志",
+      "description": "读取当前内核日志",
+      "commands": [
+        {
+          "program": "journalctl",
+          "args": [
+            "-k",
+            "-n",
+            "{limit}",
+            "--no-pager"
+          ]
+        },
+        {
+          "program": "dmesg",
+          "args": [
+            "-T"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "logs.unit",
+      "area": "logs",
+      "label": "指定服务日志",
+      "description": "指定单元的近期日志，可跟随",
+      "commands": [
+        {
+          "program": "journalctl",
+          "args": [
+            "-u",
+            "{target}",
+            "-n",
+            "{limit}",
+            "--no-pager",
+            "-o",
+            "short-iso"
+          ]
+        }
+      ],
+      "target_kind": "unit",
+      "default_target": "ssh",
+      "target_hint": "服务名",
+      "timeout_seconds": 6,
+      "follow": [
+        {
+          "program": "journalctl",
+          "args": [
+            "-f",
+            "-u",
+            "{target}",
+            "-n",
+            "{limit}",
+            "--no-pager",
+            "-o",
+            "short-iso"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "logs.file",
+      "area": "logs",
+      "label": "日志文件尾部",
+      "description": "读取绝对路径文件末尾，可跟随；不自动创建文件",
+      "commands": [
+        {
+          "program": "tail",
+          "args": [
+            "-n",
+            "{limit}",
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/var/log/syslog",
+      "target_hint": "日志文件绝对路径",
+      "timeout_seconds": 6,
+      "follow": [
+        {
+          "program": "tail",
+          "args": [
+            "-n",
+            "{limit}",
+            "-F",
+            "--",
+            "{target}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "logs.errors",
+      "area": "logs",
+      "label": "本次启动错误",
+      "description": "本次启动中 warning 及以上日志",
+      "commands": [
+        {
+          "program": "journalctl",
+          "args": [
+            "-b",
+            "-p",
+            "warning",
+            "-n",
+            "{limit}",
+            "--no-pager"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "logs.boots",
+      "area": "logs",
+      "label": "启动记录",
+      "description": "journal 中保存的系统启动列表",
+      "commands": [
+        {
+          "program": "journalctl",
+          "args": [
+            "--list-boots",
+            "--no-pager"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "logs.usage",
+      "area": "logs",
+      "label": "日志磁盘占用",
+      "description": "journal 占用空间，仅查询不清理",
+      "commands": [
+        {
+          "program": "journalctl",
+          "args": [
+            "--disk-usage"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "users.sessions",
+      "area": "users",
+      "label": "在线会话",
+      "description": "查看在线用户和登录来源",
+      "commands": [
+        {
+          "program": "w",
+          "args": []
+        },
+        {
+          "program": "who",
+          "args": [
+            "-a"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "users.accounts",
+      "area": "users",
+      "label": "账户清单",
+      "description": "读取 NSS 账户信息，不读取 shadow",
+      "commands": [
+        {
+          "program": "getent",
+          "args": [
+            "passwd"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "users.groups",
+      "area": "users",
+      "label": "组清单",
+      "description": "读取 NSS 组信息",
+      "commands": [
+        {
+          "program": "getent",
+          "args": [
+            "group"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "users.identity",
+      "area": "users",
+      "label": "用户身份",
+      "description": "UID、GID 和补充组",
+      "commands": [
+        {
+          "program": "id",
+          "args": [
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "user",
+      "default_target": "root",
+      "target_hint": "用户名",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "users.last",
+      "area": "users",
+      "label": "最近登录",
+      "description": "读取登录历史，不修改记录",
+      "commands": [
+        {
+          "program": "last",
+          "args": [
+            "-n",
+            "{limit}"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "users.failed",
+      "area": "users",
+      "label": "失败登录",
+      "description": "读取 btmp，通常需要额外权限",
+      "commands": [
+        {
+          "program": "lastb",
+          "args": [
+            "-n",
+            "{limit}"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.nft",
+      "area": "security",
+      "label": "nftables 规则",
+      "description": "只读规则清单，不修改或清空规则",
+      "commands": [
+        {
+          "program": "nft",
+          "args": [
+            "list",
+            "ruleset"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.iptables",
+      "area": "security",
+      "label": "IPv4 防火墙",
+      "description": "只读 iptables 规则",
+      "commands": [
+        {
+          "program": "iptables",
+          "args": [
+            "-S"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.iptables6",
+      "area": "security",
+      "label": "IPv6 防火墙",
+      "description": "只读 ip6tables 规则",
+      "commands": [
+        {
+          "program": "ip6tables",
+          "args": [
+            "-S"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.ufw",
+      "area": "security",
+      "label": "UFW 状态",
+      "description": "查看 UFW 配置与规则",
+      "commands": [
+        {
+          "program": "ufw",
+          "args": [
+            "status",
+            "verbose"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.selinux",
+      "area": "security",
+      "label": "SELinux 状态",
+      "description": "查看强制访问控制状态",
+      "commands": [
+        {
+          "program": "sestatus",
+          "args": []
+        },
+        {
+          "program": "getenforce",
+          "args": []
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.apparmor",
+      "area": "security",
+      "label": "AppArmor 状态",
+      "description": "查看已加载策略与模式",
+      "commands": [
+        {
+          "program": "aa-status",
+          "args": []
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.audit",
+      "area": "security",
+      "label": "审计状态",
+      "description": "只读内核审计状态",
+      "commands": [
+        {
+          "program": "auditctl",
+          "args": [
+            "-s"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "security.ssh",
+      "area": "security",
+      "label": "SSH 服务配置",
+      "description": "只读解析 sshd 配置，不启动服务",
+      "commands": [
+        {
+          "program": "sshd",
+          "args": [
+            "-T"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "packages.installed",
+      "area": "packages",
+      "label": "已安装软件包",
+      "description": "Debian/RPM 软件包清单",
+      "commands": [
+        {
+          "program": "dpkg-query",
+          "args": [
+            "-W"
+          ]
+        },
+        {
+          "program": "rpm",
+          "args": [
+            "-qa"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "packages.upgradable",
+      "area": "packages",
+      "label": "本地可升级清单",
+      "description": "仅使用已有元数据，不执行 apt update 或安装",
+      "commands": [
+        {
+          "program": "apt",
+          "args": [
+            "list",
+            "--upgradable"
+          ]
+        },
+        {
+          "program": "dnf",
+          "args": [
+            "--cacheonly",
+            "check-update"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 12
+    },
+    {
+      "id": "packages.detail",
+      "area": "packages",
+      "label": "软件包详情",
+      "description": "指定软件包的版本、描述和依赖",
+      "commands": [
+        {
+          "program": "dpkg-query",
+          "args": [
+            "-s",
+            "{target}"
+          ]
+        },
+        {
+          "program": "rpm",
+          "args": [
+            "-qi",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "package",
+      "default_target": "bash",
+      "target_hint": "软件包名称，例如 bash",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "packages.files",
+      "area": "packages",
+      "label": "包内文件",
+      "description": "指定软件包安装的文件",
+      "commands": [
+        {
+          "program": "dpkg-query",
+          "args": [
+            "-L",
+            "{target}"
+          ]
+        },
+        {
+          "program": "rpm",
+          "args": [
+            "-ql",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "package",
+      "default_target": "bash",
+      "target_hint": "软件包名称",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "packages.owner",
+      "area": "packages",
+      "label": "文件所属软件包",
+      "description": "查找绝对路径文件属于哪个软件包",
+      "commands": [
+        {
+          "program": "dpkg-query",
+          "args": [
+            "-S",
+            "{target}"
+          ]
+        },
+        {
+          "program": "rpm",
+          "args": [
+            "-qf",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/bin/bash",
+      "target_hint": "文件绝对路径",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "packages.history",
+      "area": "packages",
+      "label": "包管理日志",
+      "description": "读取 Debian dpkg 日志尾部",
+      "commands": [
+        {
+          "program": "tail",
+          "args": [
+            "-n",
+            "{limit}",
+            "--",
+            "/var/log/dpkg.log"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "containers.list",
+      "area": "containers",
+      "label": "容器对象下钻",
+      "description": "进入 Docker 容器清单，再查看容器状态",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "ps",
+            "-a",
+            "--no-trunc"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "containers.images",
+      "area": "containers",
+      "label": "镜像清单",
+      "description": "只读镜像列表，不拉取或删除",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "image",
+            "ls",
+            "--digests"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "containers.stats",
+      "area": "containers",
+      "label": "容器资源快照",
+      "description": "一次性 CPU、内存、网络和 IO 统计",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "stats",
+            "--no-stream"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 10
+    },
+    {
+      "id": "containers.inspect",
+      "area": "containers",
+      "label": "容器详情",
+      "description": "指定容器的 inspect 报告",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "inspect",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "container",
+      "default_target": "",
+      "target_hint": "容器 ID 或名称，可通过容器列表选择",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "containers.logs",
+      "area": "containers",
+      "label": "容器日志",
+      "description": "容器近期日志，可跟随",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "logs",
+            "--tail",
+            "{limit}",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "container",
+      "default_target": "",
+      "target_hint": "容器 ID 或名称",
+      "timeout_seconds": 6,
+      "follow": [
+        {
+          "program": "docker",
+          "args": [
+            "logs",
+            "--follow",
+            "--tail",
+            "{limit}",
+            "{target}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "containers.networks",
+      "area": "containers",
+      "label": "容器网络",
+      "description": "Docker 网络清单",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "network",
+            "ls"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "containers.volumes",
+      "area": "containers",
+      "label": "数据卷清单",
+      "description": "Docker 数据卷清单，不删除卷",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "volume",
+            "ls"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "containers.disk",
+      "area": "containers",
+      "label": "Docker 磁盘占用",
+      "description": "镜像、容器、卷和构建缓存占用，仅查询",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "system",
+            "df"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "containers.compose",
+      "area": "containers",
+      "label": "Compose 项目",
+      "description": "Docker Compose 项目状态",
+      "commands": [
+        {
+          "program": "docker",
+          "args": [
+            "compose",
+            "ls"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "kubernetes.contexts",
+      "area": "kubernetes",
+      "label": "集群上下文",
+      "description": "读取 kubeconfig 上下文，不切换上下文",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "config",
+            "get-contexts"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "kubernetes.nodes",
+      "area": "kubernetes",
+      "label": "节点清单",
+      "description": "查询当前上下文的节点状态",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "--request-timeout=5s",
+            "get",
+            "nodes",
+            "-o",
+            "wide"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 8
+    },
+    {
+      "id": "kubernetes.pods",
+      "area": "kubernetes",
+      "label": "命名空间 Pod",
+      "description": "查询指定命名空间 Pod",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "--request-timeout=5s",
+            "get",
+            "pods",
+            "-n",
+            "{target}",
+            "-o",
+            "wide"
+          ]
+        }
+      ],
+      "target_kind": "namespace",
+      "default_target": "default",
+      "target_hint": "命名空间",
+      "timeout_seconds": 8
+    },
+    {
+      "id": "kubernetes.deployments",
+      "area": "kubernetes",
+      "label": "工作负载",
+      "description": "查询指定命名空间 Deployment",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "--request-timeout=5s",
+            "get",
+            "deployments",
+            "-n",
+            "{target}",
+            "-o",
+            "wide"
+          ]
+        }
+      ],
+      "target_kind": "namespace",
+      "default_target": "default",
+      "target_hint": "命名空间",
+      "timeout_seconds": 8
+    },
+    {
+      "id": "kubernetes.services",
+      "area": "kubernetes",
+      "label": "Service 清单",
+      "description": "查询指定命名空间的 Service",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "--request-timeout=5s",
+            "get",
+            "services",
+            "-n",
+            "{target}",
+            "-o",
+            "wide"
+          ]
+        }
+      ],
+      "target_kind": "namespace",
+      "default_target": "default",
+      "target_hint": "命名空间",
+      "timeout_seconds": 8
+    },
+    {
+      "id": "kubernetes.events",
+      "area": "kubernetes",
+      "label": "近期事件",
+      "description": "查询命名空间事件，按时间排序",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "--request-timeout=5s",
+            "get",
+            "events",
+            "-n",
+            "{target}",
+            "--sort-by=.metadata.creationTimestamp"
+          ]
+        }
+      ],
+      "target_kind": "namespace",
+      "default_target": "default",
+      "target_hint": "命名空间",
+      "timeout_seconds": 8
+    },
+    {
+      "id": "kubernetes.describe",
+      "area": "kubernetes",
+      "label": "资源详情",
+      "description": "查询当前命名空间的资源，例如 pod/example",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "--request-timeout=5s",
+            "describe",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "resource",
+      "default_target": "",
+      "target_hint": "资源类型/名称，例如 pod/example",
+      "timeout_seconds": 8
+    },
+    {
+      "id": "kubernetes.logs",
+      "area": "kubernetes",
+      "label": "Pod 日志",
+      "description": "读取当前命名空间 Pod 日志，可跟随",
+      "commands": [
+        {
+          "program": "kubectl",
+          "args": [
+            "--request-timeout=5s",
+            "logs",
+            "--tail",
+            "{limit}",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "resource",
+      "default_target": "",
+      "target_hint": "当前命名空间 Pod 名称或 deployment/名称",
+      "timeout_seconds": 8,
+      "follow": [
+        {
+          "program": "kubectl",
+          "args": [
+            "logs",
+            "--follow",
+            "--tail",
+            "{limit}",
+            "{target}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "schedules.cron",
+      "area": "schedules",
+      "label": "当前用户 crontab",
+      "description": "只读列出当前用户计划任务",
+      "commands": [
+        {
+          "program": "crontab",
+          "args": [
+            "-l"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "schedules.cron-system",
+      "area": "schedules",
+      "label": "系统 cron 配置",
+      "description": "只读系统 crontab",
+      "commands": [
+        {
+          "program": "cat",
+          "args": [
+            "/etc/crontab"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "schedules.cron-directory",
+      "area": "schedules",
+      "label": "cron 目录",
+      "description": "列出 /etc/cron.d 的配置文件",
+      "commands": [
+        {
+          "program": "ls",
+          "args": [
+            "-la",
+            "--",
+            "/etc/cron.d"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "schedules.timers",
+      "area": "schedules",
+      "label": "systemd 定时器",
+      "description": "列出全部 timer 及下次触发时间",
+      "commands": [
+        {
+          "program": "systemctl",
+          "args": [
+            "list-timers",
+            "--all",
+            "--no-pager"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "schedules.at",
+      "area": "schedules",
+      "label": "at 队列",
+      "description": "查看当前用户的延后执行队列",
+      "commands": [
+        {
+          "program": "atq",
+          "args": []
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "files.stat",
+      "area": "files",
+      "label": "文件属性",
+      "description": "所有者、权限、大小和时间戳",
+      "commands": [
+        {
+          "program": "stat",
+          "args": [
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/etc/hosts",
+      "target_hint": "文件或目录绝对路径",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "files.directory",
+      "area": "files",
+      "label": "目录清单",
+      "description": "显示隐藏文件、权限和容量",
+      "commands": [
+        {
+          "program": "ls",
+          "args": [
+            "-lah",
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/var/log",
+      "target_hint": "目录绝对路径",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "files.permissions",
+      "area": "files",
+      "label": "路径权限链",
+      "description": "逐级查看路径权限和符号链接",
+      "commands": [
+        {
+          "program": "namei",
+          "args": [
+            "-l",
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/etc/hosts",
+      "target_hint": "绝对路径",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "files.find",
+      "area": "files",
+      "label": "浅层文件查找",
+      "description": "仅在指定路径下查找两层以内文件",
+      "commands": [
+        {
+          "program": "find",
+          "args": [
+            "{target}",
+            "-maxdepth",
+            "2",
+            "-type",
+            "f",
+            "-print"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/var/log",
+      "target_hint": "查找起点绝对路径",
+      "timeout_seconds": 12
+    },
+    {
+      "id": "files.type",
+      "area": "files",
+      "label": "文件类型",
+      "description": "识别文件格式，不执行文件",
+      "commands": [
+        {
+          "program": "file",
+          "args": [
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/etc/hosts",
+      "target_hint": "文件绝对路径",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "files.sha256",
+      "area": "files",
+      "label": "SHA-256 校验",
+      "description": "读取文件计算哈希，大文件可能超时",
+      "commands": [
+        {
+          "program": "sha256sum",
+          "args": [
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/etc/hosts",
+      "target_hint": "文件绝对路径",
+      "timeout_seconds": 12
+    },
+    {
+      "id": "files.open",
+      "area": "files",
+      "label": "文件占用",
+      "description": "查找使用指定文件的进程，不发送信号",
+      "commands": [
+        {
+          "program": "lsof",
+          "args": [
+            "-nP",
+            "--",
+            "{target}"
+          ]
+        },
+        {
+          "program": "fuser",
+          "args": [
+            "--",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "/var/log/syslog",
+      "target_hint": "文件绝对路径",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "files.archive",
+      "area": "files",
+      "label": "tar 内容清单",
+      "description": "仅列出 tar 归档，不解包或覆盖文件",
+      "commands": [
+        {
+          "program": "tar",
+          "args": [
+            "-tf",
+            "{target}"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "",
+      "target_hint": "tar 归档绝对路径",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "databases.redis",
+      "area": "databases",
+      "label": "Redis 概况",
+      "description": "使用本机 redis-cli 默认连接，仅执行 INFO server",
+      "commands": [
+        {
+          "program": "redis-cli",
+          "args": [
+            "--no-auth-warning",
+            "INFO",
+            "server"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "databases.postgres",
+      "area": "databases",
+      "label": "PostgreSQL 会话",
+      "description": "使用现有 libpq 环境/认证配置，-w 禁止交互询问密码",
+      "commands": [
+        {
+          "program": "psql",
+          "args": [
+            "-X",
+            "-w",
+            "-P",
+            "pager=off",
+            "-c",
+            "SELECT pid, usename, datname, state, wait_event_type FROM pg_stat_activity ORDER BY pid;"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "databases.mysql",
+      "area": "databases",
+      "label": "MySQL 状态",
+      "description": "使用现有客户端认证配置，仅执行 SHOW GLOBAL STATUS",
+      "commands": [
+        {
+          "program": "mysql",
+          "args": [
+            "--connect-timeout=3",
+            "--batch",
+            "-e",
+            "SHOW GLOBAL STATUS;"
+          ]
+        }
+      ],
+      "target_kind": "none",
+      "default_target": "",
+      "target_hint": "",
+      "timeout_seconds": 6
+    },
+    {
+      "id": "databases.sqlite",
+      "area": "databases",
+      "label": "SQLite 结构",
+      "description": "以只读方式查看 SQLite 数据库 schema",
+      "commands": [
+        {
+          "program": "sqlite3",
+          "args": [
+            "-readonly",
+            "{target}",
+            ".schema"
+          ]
+        }
+      ],
+      "target_kind": "path",
+      "default_target": "",
+      "target_hint": "已有 SQLite 数据库绝对路径",
+      "timeout_seconds": 6
+    }
+  ]
+}

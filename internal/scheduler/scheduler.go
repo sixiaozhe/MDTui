@@ -114,8 +114,13 @@ func (e *Engine) Args(id string) ([]string, string) {
 		if len(parts) == 2 {
 			value := e.Inputs[parts[0]]
 			for _, input := range e.Page.Inputs {
-				if input.ID == parts[0] && input.Required && value == "" {
-					return nil, "请填写参数: " + input.Label
+				if input.ID == parts[0] {
+					if input.Required && value == "" {
+						return nil, "请填写参数: " + input.Label
+					}
+					if reason := input.Validate(value); reason != "" {
+						return nil, input.Label + ": " + reason
+					}
 				}
 			}
 			result = append(result, value)
@@ -273,7 +278,17 @@ func (e *Engine) Consume(ev Event) {
 		if err == nil && p.Definition.Format == "items-json" {
 			items := ev.Items
 			{
+				cursorID := ""
+				if p.Cursor >= 0 && p.Cursor < len(p.Items) {
+					cursorID = p.Items[p.Cursor].ID
+				}
 				p.Items = items
+				for i, item := range items {
+					if item.ID == cursorID {
+						p.Cursor = i
+						break
+					}
+				}
 				if p.Cursor >= len(items) {
 					p.Cursor = max(0, len(items)-1)
 				}
@@ -377,13 +392,27 @@ func (e *Engine) Select(id, value string) {
 	e.invalidateKind(id, "selected")
 	e.dispatch()
 }
-func (e *Engine) Submit(id, value string) {
+func (e *Engine) Submit(id, value string) string {
+	found := false
+	for _, input := range e.Page.Inputs {
+		if input.ID == id {
+			found = true
+			if reason := input.Validate(value); reason != "" {
+				return input.Label + ": " + reason
+			}
+			break
+		}
+	}
+	if !found {
+		return "参数不存在: " + id
+	}
 	if e.Inputs[id] == value {
-		return
+		return ""
 	}
 	e.Inputs[id] = value
 	e.invalidateKind(id, "value")
 	e.dispatch()
+	return ""
 }
 func (e *Engine) Cursor(id string) {
 	e.invalidateKind(id, "cursor")

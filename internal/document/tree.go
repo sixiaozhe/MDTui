@@ -56,8 +56,11 @@ func check(path string, loadPage func(string) (*Page, error)) ([]*Page, error) {
 	}
 	pages := []*Page{root}
 	seen := map[string]bool{rootFile: true}
+	// Revisit shared subtrees when reached through a deeper navigation path.
+	walkedDepth := map[string]int{}
 	var walk func(current *Page, depth int, chain []string) error
 	walk = func(current *Page, depth int, chain []string) error {
+		walkedDepth[chain[len(chain)-1]] = depth
 		for _, panel := range current.Panels {
 			if !panel.HasOpen() {
 				continue
@@ -80,6 +83,11 @@ func check(path string, loadPage func(string) (*Page, error)) ([]*Page, error) {
 					child := cache[target]
 					if child.Parent != "" && child.Parent != panel.ID {
 						return fmt.Errorf("%s: panel %q: open %q: %s: parent %q 不一致", current.File, panel.ID, ref, child.File, child.Parent)
+					}
+					if depth+1 > walkedDepth[target] {
+						if err := walk(child, depth+1, append(chain[:len(chain):len(chain)], target)); err != nil {
+							return err
+						}
 					}
 					continue
 				}

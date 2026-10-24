@@ -30,14 +30,14 @@ func run(args []string) (code int) {
 		}
 	}()
 	var file, logFile string
-	check, noColor := false, false
+	check, noColor, noMouse := false, false, false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--version":
 			fmt.Println("mdtui", version)
 			return 0
 		case "--help", "-h":
-			fmt.Println("mdtui [--no-color] [--log-file PATH] PAGE.md\nmdtui check PAGE.md\nmdtui --version\n页面必须来自可信本地来源。Tab 切换，Enter 选择，F2 动作，Z 放大，q 退出。")
+			fmt.Println("mdtui [--no-color] [--no-mouse] [--log-file PATH] PAGE.md\nmdtui check PAGE.md\nmdtui --version\n页面必须来自可信本地来源。Tab 切换，Enter 选择，F2 动作，Z 放大，q 退出。支持鼠标单击定位、双击列表确认、滚轮滚动；--no-mouse 关闭鼠标接管。")
 			return 0
 		case "check":
 			if file != "" || check {
@@ -46,6 +46,8 @@ func run(args []string) (code int) {
 			check = true
 		case "--no-color":
 			noColor = true
+		case "--no-mouse":
+			noMouse = true
 		case "--log-file":
 			i++
 			if i == len(args) {
@@ -112,13 +114,15 @@ func run(args []string) (code int) {
 		return 3
 	}
 	defer engine.Close()
-	if err = tui.New(screen, engine, noColor || os.Getenv("NO_COLOR") != "").Run(ctx); err != nil {
+	ui := tui.New(screen, engine, noColor || os.Getenv("NO_COLOR") != "")
+	ui.NoMouse = noMouse
+	if err = ui.Run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
 }
 func usage() int {
-	fmt.Fprintln(os.Stderr, "用法: mdtui [--no-color] [--log-file PATH] PAGE.md | mdtui check PAGE.md")
+	fmt.Fprintln(os.Stderr, "用法: mdtui [--no-color] [--no-mouse] [--log-file PATH] PAGE.md | mdtui check PAGE.md")
 	return 2
 }

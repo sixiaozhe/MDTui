@@ -2,6 +2,8 @@
 
 完整语法参考见 [syntax.md](syntax.md)，完整字段契约见 [需求基线第 5 节](requirements.md)。可复制 [network.md](../examples/network.md) 或 [input.md](../examples/input.md) 开始编写。
 
+需要表单时可复制 [controls.md](../examples/controls.md)：input 的 type 可选 text（默认）、toggle、select、number。select 使用静态 options 区分显示 label 和命令 value；number 可声明 min/max 整数边界。所有控件继续使用 `{ref: "参数ID.value"}` 传字符串。给现有 action 增加 `button: true` 即可显示可聚焦按钮，并保留快捷键、依赖校验和 confirm 行为。
+
 所有扩展从第 1 列的 `:::mdtui TYPE` 开始，单独一行 `:::` 结束。围栏代码块中的声明只显示，不执行。普通 Markdown 合并成页面上方说明区。
 
 必须有且只有一个 page，并放在其他声明前。所有 ID 共享命名空间，格式 `[A-Za-z][A-Za-z0-9_-]{0,63}`。未知类型/字段、重复键/ID、别名/合并键、自定义标签和循环依赖均报错。页面 ≤1 MiB、≤16 panel、≤16 input、≤32 action，YAML 嵌套 ≤8。
@@ -20,6 +22,8 @@ max_parallel: 2
 任务较多时可用 `layout: workspace` 和 `sidebar: 列表面板ID`。宽终端左侧保留列表、右侧一次显示一个详情面板；窄终端显示当前焦点面板。列表选中对象后，工作区会自动显示首个引用该列表的详情面板。`[` / `]` 切换详情，Tab 切换焦点，Z 放大当前面板并在放大时用 Tab 切换面板，Esc 退出放大。见 [Linux 运维工作台](../examples/linux-workbench.md)。
 
 panel 声明必填 id、exec；可选 title、mode（snapshot 默认/stream）、format（markdown 默认/text/items-json）、open（仅 items-json snapshot 可用；单个相对路径，或选项 ID 到子页路径的映射）、on_focus、on_select、refresh、timeout、autostart（默认 true）。snapshot 默认超时 5s，refresh 最小 250ms；stream 默认超时 0（不限时），不能设置 refresh 或 items-json。
+
+panel 可设置 `max_height: 6` 限制总高度（包含上下边框，最小 3 行），省略时自动分配。高度上限也适用于放大视图；超出的内容保留并可滚动。堆叠及主从布局右列会将省出的空间分配给其他未达到上限的面板。示例见 [panel-height.md](../examples/panel-height.md)。
 
 列表可以通过 `open: ./child.md` 进入同一个子页，也可以用映射让不同选项打开不同子页：
 

@@ -24,6 +24,7 @@ type Panel struct {
 	Exec                          []Arg
 	Refresh, Timeout              time.Duration
 	Autostart                     bool
+	MaxHeight                     int
 }
 
 func (p Panel) HasOpen() bool { return p.Open != "" || len(p.OpenByID) > 0 }
@@ -56,13 +57,17 @@ func (p Panel) OpenTargets() []string {
 }
 
 type Input struct {
-	ID, Label, Default string
-	Required           bool
-	MaxLength          int
+	ID, Label, Default, Type string
+	Required                 bool
+	MaxLength                int
+	Options                  []Option
+	Min, Max                 *int64
 }
+type Option struct{ Value, Label string }
 type Action struct {
 	ID, Label, Key, Run, Confirm string
 	Refresh                      []string
+	Button                       bool
 }
 type Page struct {
 	File, Dir, ID, Title, Layout, Sidebar, Parent, Markdown string
@@ -209,9 +214,13 @@ func Parse(file string, data []byte) (p *Page, err error) {
 				c.fail(b.line, "max_parallel", "取值范围 1～8")
 			}
 		case "panel":
-			c.allowed(b, "id title mode format exec refresh timeout autostart open on_focus on_select")
+			c.allowed(b, "id title mode format exec refresh timeout autostart open on_focus on_select max_height")
 			v := Panel{ID: id, Title: c.str(b, "title", id, false), Mode: c.str(b, "mode", "snapshot", false), Format: c.str(b, "format", "markdown", false), OnFocus: c.str(b, "on_focus", "", false), OnSelect: c.str(b, "on_select", "", false), Autostart: c.boolean(b, "autostart", true)}
 			v.Open, v.OpenByID = c.openTargets(b)
+			v.MaxHeight = c.integer(b, "max_height", 0)
+			if _, present := b.fields["max_height"]; present && v.MaxHeight < 3 {
+				c.fail(b.line, "max_height", "至少 3 行，包含上下边框；省略表示不限高度")
+			}
 			if v.Mode != "snapshot" && v.Mode != "stream" {
 				c.fail(b.line, "mode", "使用 snapshot 或 stream")
 			}
@@ -264,15 +273,10 @@ func Parse(file string, data []byte) (p *Page, err error) {
 			}
 			p.Panels = append(p.Panels, v)
 		case "input":
-			c.allowed(b, "id label default required max_length")
-			v := Input{ID: id, Label: c.str(b, "label", id, false), Default: c.str(b, "default", "", false), Required: c.boolean(b, "required", false), MaxLength: c.integer(b, "max_length", 256)}
-			if v.MaxLength < 1 || v.MaxLength > 4096 || utf8.RuneCountInString(v.Default) > v.MaxLength || strings.ContainsAny(v.Default, "\r\n") {
-				c.fail(b.line, "input", "单行默认值不得超出 1～4096 的 max_length")
-			}
-			p.Inputs = append(p.Inputs, v)
+			p.Inputs = append(p.Inputs, c.input(b, id))
 		case "action":
-			c.allowed(b, "id label key run refresh confirm")
-			v := Action{ID: id, Label: c.str(b, "label", id, false), Key: c.str(b, "key", "", false), Run: c.str(b, "run", "", false), Confirm: c.str(b, "confirm", "", false)}
+			c.allowed(b, "id label key run refresh confirm button")
+			v := Action{ID: id, Label: c.str(b, "label", id, false), Key: c.str(b, "key", "", false), Run: c.str(b, "run", "", false), Confirm: c.str(b, "confirm", "", false), Button: c.boolean(b, "button", false)}
 			if _, ok := b.fields["confirm"]; ok && strings.TrimSpace(v.Confirm) == "" {
 				c.fail(b.line, "confirm", "确认文案不能为空")
 			}
